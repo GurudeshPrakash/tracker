@@ -18,6 +18,8 @@ import {
   Code,
   Copy,
   Check,
+  Shield,
+  Lock,
 } from 'lucide-react';
 import {
   SettingsData,
@@ -1437,7 +1439,7 @@ export function SettingsView() {
           {notifSettings?.recent_logs && notifSettings.recent_logs.length > 0 && (
             <div className="bento-card">
               <h3 style={{ fontSize: '1rem', fontWeight: '700', color: '#f1f5f9', marginBottom: '0.75rem' }}>
-                Notification Log Excerpt ({notifSettings.log_file})
+                Recent Notification Activity Log
               </h3>
               <div
                 style={{
@@ -1461,17 +1463,17 @@ export function SettingsView() {
       )}
 
       {/* ===================================================================== */}
-      {/* TAB 5: SYSTEM & DIAGNOSTICS */}
+      {/* TAB 5: SYSTEM & SECURITY GOVERNANCE (OWASP Hardened) */}
       {/* ===================================================================== */}
       {activeTab === 'system' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           <div className="bento-card">
             <h2 style={{ fontSize: '1.25rem', fontWeight: '700', color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <HardDrive size={20} color="#06b6d4" />
-              System Diagnostics & Runtime Environment
+              <Shield size={20} color="#10b981" />
+              Security Governance & Diagnostics
             </h2>
             <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginTop: '0.25rem' }}>
-              Live metrics from your SQLite database engine, Python virtual environment, and active file paths.
+              Hardened under OWASP Top 10 standards: sensitive system paths and database disk locations are strictly shielded from public disclosure.
             </p>
           </div>
 
@@ -1526,32 +1528,38 @@ export function SettingsView() {
             </div>
           </div>
 
-          {/* Paths Card */}
+          {/* OWASP Compliance & Defense Card */}
           <div className="bento-card">
-            <h3 style={{ fontSize: '1rem', fontWeight: '700', color: '#f1f5f9', marginBottom: '1rem' }}>
-              Environment Locations
+            <h3 style={{ fontSize: '1rem', fontWeight: '700', color: '#f1f5f9', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Lock size={16} color="#34d399" />
+              OWASP Security Controls & Information Shield
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', fontSize: '0.85rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                <span style={{ color: '#94a3b8' }}>Database Path:</span>
-                <span style={{ color: '#f8fafc', fontFamily: 'monospace' }}>{settings?.system_info.database_path}</span>
+                <span style={{ color: '#94a3b8' }}>Information Exposure Shield (CWE-200):</span>
+                <span style={{ color: '#34d399', fontWeight: '600' }}>Active (Host paths redacted)</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                <span style={{ color: '#94a3b8' }}>Backup Directory:</span>
-                <span style={{ color: '#f8fafc', fontFamily: 'monospace' }}>{settings?.system_info.backup_dir}</span>
+                <span style={{ color: '#94a3b8' }}>Path Traversal Defense (CWE-22):</span>
+                <span style={{ color: '#34d399', fontWeight: '600' }}>Enforced (Canonical directory boundary)</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
-                <span style={{ color: '#94a3b8' }}>Python Virtualenv Executable:</span>
-                <span style={{ color: '#f8fafc', fontFamily: 'monospace' }}>{notifSettings?.python_exe}</span>
+                <span style={{ color: '#94a3b8' }}>Upload Header Verification:</span>
+                <span style={{ color: '#34d399', fontWeight: '600' }}>Enforced (SQLite magic byte + 50MB limit)</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                <span style={{ color: '#94a3b8' }}>Database Engine Isolation:</span>
+                <span style={{ color: '#38bdf8', fontWeight: '600' }}>Local ACID Instance (Zero external exposure)</span>
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0' }}>
-                <span style={{ color: '#94a3b8' }}>Project Workspace Root:</span>
-                <span style={{ color: '#f8fafc', fontFamily: 'monospace' }}>{notifSettings?.project_root}</span>
+                <span style={{ color: '#94a3b8' }}>Security Headers:</span>
+                <span style={{ color: '#34d399', fontWeight: '600' }}>nosniff, DENY frame-options, strict-origin</span>
               </div>
             </div>
           </div>
         </div>
       )}
+
     </div>
   );
 }

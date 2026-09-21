@@ -11,6 +11,8 @@ import sys
 import csv
 import io
 import json
+import re
+import logging
 import sqlite3
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -53,6 +55,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Tracker API", lifespan=lifespan)
+
+# OWASP Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
+    return response
 
 # Allow CORS for development if needed
 app.add_middleware(
@@ -640,13 +652,41 @@ def save_review(req: ReviewCreateRequest):
 
 
 # ---------------------------------------------------------------------------
-# Settings, Backups, Recurring, Exports & Automation
+# Settings, Backups, Recurring, Exports & Automation (OWASP Hardened)
 # ---------------------------------------------------------------------------
+
+SAFE_BACKUP_FILENAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]+\.db$")
+
+
+def validate_backup_filename(filename: str) -> str:
+    """OWASP A01/A04 Path Traversal Guard:
+    Ensure filename contains strictly valid characters and resolves strictly inside BACKUP_DIR.
+    """
+    if not filename or not SAFE_BACKUP_FILENAME_REGEX.match(filename):
+        raise HTTPException(status_code=400, detail="Invalid filename format.")
+
+    canonical_dir = os.path.realpath(backup.BACKUP_DIR)
+    target_path = os.path.realpath(os.path.join(backup.BACKUP_DIR, filename))
+
+    # Path traversal check: resolved path must be inside canonical backup directory
+    if not target_path.startswith(canonical_dir + os.sep) and target_path != canonical_dir:
+        raise HTTPException(status_code=400, detail="Access denied.")
+
+    if not os.path.isfile(target_path):
+        raise HTTPException(status_code=404, detail="Requested file not found.")
+
+    return target_path
+
 
 @app.get("/api/settings")
 def get_settings():
     with get_conn() as conn:
-        backups = backup.list_backups()
+        raw_backups = backup.list_backups()
+        # OWASP CWE-200: Redact absolute host filesystem paths
+        safe_backups = [
+            {"name": b["name"], "size_mb": b["size_mb"], "created": b["created"]}
+            for b in raw_backups
+        ]
         recurring = rec_svc.get_all(conn)
         task_count = conn.execute("SELECT COUNT(*) FROM task").fetchone()[0]
         session_count = conn.execute("SELECT COUNT(*) FROM learning_session").fetchone()[0]
@@ -654,12 +694,13 @@ def get_settings():
         update_count = conn.execute("SELECT COUNT(*) FROM daily_update").fetchone()[0]
 
     return {
-        "backups": backups,
+        "backups": safe_backups,
         "recurring_tasks": [asdict(r) for r in recurring],
         "system_info": {
+            "status": "healthy",
+            "storage_engine": "SQLite",
             "sqlite_version": sqlite3.sqlite_version,
-            "database_path": backup.DB_PATH,
-            "backup_dir": backup.BACKUP_DIR,
+            "security_shield": "OWASP Information Disclosure Shield Active",
             "table_counts": {
                 "tasks": task_count,
                 "sessions": session_count,
@@ -673,7 +714,12 @@ def get_settings():
 
 @app.get("/api/backups")
 def get_backups():
-    return backup.list_backups()
+    raw_backups = backup.list_backups()
+    # OWASP CWE-200: Redact absolute host filesystem paths
+    return [
+        {"name": b["name"], "size_mb": b["size_mb"], "created": b["created"]}
+        for b in raw_backups
+    ]
 
 
 @app.post("/api/backups")
@@ -682,43 +728,50 @@ def trigger_backup():
         path = backup.backup_now()
         return {"success": True, "filename": os.path.basename(path)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"Backup creation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create backup.")
 
 
 @app.get("/api/backups/{filename}/download")
 def download_backup(filename: str):
-    if not filename.endswith(".db") or "/" in filename or "\\" in filename or ".." in filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    path = os.path.join(backup.BACKUP_DIR, filename)
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail="Backup file not found")
-    return FileResponse(path, filename=filename, media_type="application/x-sqlite3")
+    target_path = validate_backup_filename(filename)
+    return FileResponse(target_path, filename=filename, media_type="application/x-sqlite3")
 
 
 @app.post("/api/backups/restore")
 def restore_backup(req: BackupRestoreRequest):
-    if not req.filename.endswith(".db") or "/" in req.filename or "\\" in req.filename or ".." in req.filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    path = os.path.join(backup.BACKUP_DIR, req.filename)
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail="Backup file not found")
+    target_path = validate_backup_filename(req.filename)
     try:
-        backup.restore_from(path)
-        return {"success": True, "message": f"Database restored successfully from {req.filename}"}
+        backup.restore_from(target_path)
+        return {"success": True, "message": "Database restored successfully."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"Database restore error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to restore database from backup.")
 
 
 @app.post("/api/backups/upload")
 async def upload_and_restore_backup(file: UploadFile = File(...)):
-    if not file.filename.endswith(".db"):
-        raise HTTPException(status_code=400, detail="File must be a SQLite .db file")
+    # 1. Filename validation
+    if not file.filename or not file.filename.endswith(".db"):
+        raise HTTPException(status_code=400, detail="File must be a SQLite .db file.")
+
+    # 2. Maximum file size check (50 MB limit to prevent Denial of Service)
+    MAX_SIZE = 50 * 1024 * 1024
+    contents = await file.read(MAX_SIZE + 1)
+    if len(contents) > MAX_SIZE:
+        raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 50MB.")
+
+    # 3. Magic header validation: SQLite database header starts with 'SQLite format 3\x00'
+    if not contents.startswith(b"SQLite format 3\x00"):
+        raise HTTPException(status_code=400, detail="Invalid file: Missing valid SQLite database header.")
+
     try:
-        contents = await file.read()
         backup.restore_from(contents)
-        return {"success": True, "message": f"Database restored from uploaded file: {file.filename}"}
+        return {"success": True, "message": "Database restored from uploaded backup."}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logging.error(f"Uploaded database restore error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to restore database from uploaded file.")
+
 
 
 # Recurring Task Endpoints
@@ -835,7 +888,7 @@ def export_database_json():
     dump["_metadata"] = {
         "exported_at": today_iso,
         "app": "flux-tracker",
-        "sqlite_version": sqlite3.sqlite_version,
+        "format": "json_relational_export",
     }
     json_str = json.dumps(dump, indent=2, default=str)
     return Response(
@@ -848,34 +901,32 @@ def export_database_json():
 # Desktop Notifications & Task Scheduler Setup
 @app.get("/api/settings/notifications")
 def get_notification_settings():
+    # Portable scheduled task commands using standard Windows environment execution
+    morning_cmd = 'schtasks /create /tn "FluxTracker_Morning" /tr "python \"%CD%\\reminders\\notify.py\" morning" /sc daily /st 09:00 /f'
+    evening_cmd = 'schtasks /create /tn "FluxTracker_Evening" /tr "python \"%CD%\\reminders\\notify.py\" evening" /sc daily /st 21:00 /f'
+
     root = os.path.dirname(os.path.abspath(__file__))
-    python_exe = sys.executable
-    notify_script = os.path.join(root, "reminders", "notify.py")
     log_path = os.path.join(root, "data", "notify.log")
-
-    morning_cmd = f'schtasks /create /tn "FluxTracker_Morning" /tr "\"{python_exe}\" \"{notify_script}\" morning" /sc daily /st 09:00 /f'
-    evening_cmd = f'schtasks /create /tn "FluxTracker_Evening" /tr "\"{python_exe}\" \"{notify_script}\" evening" /sc daily /st 21:00 /f'
-
     recent_logs = []
     if os.path.exists(log_path):
         try:
             with open(log_path, "r", encoding="utf-8") as f:
-                lines = [line.strip() for line in f.readlines() if line.strip()]
-                recent_logs = lines[-15:]
+                lines = [line.strip() for line in f.readlines() if line.strip()][-15:]
+                for line in lines:
+                    # OWASP CWE-200: Redact absolute host filesystem paths like D:\... or C:\...
+                    clean_line = re.sub(r"[A-Za-z]:\\[^:\s]+", "[REDACTED_PATH]", line)
+                    recent_logs.append(clean_line)
         except Exception:
             pass
 
     return {
         "morning_time": "09:00",
         "evening_time": "21:00",
-        "project_root": root,
-        "python_exe": python_exe,
-        "notify_script": notify_script,
         "schtasks_morning_cmd": morning_cmd,
         "schtasks_evening_cmd": evening_cmd,
-        "log_file": log_path,
         "recent_logs": recent_logs,
     }
+
 
 
 @app.post("/api/settings/test-notification")

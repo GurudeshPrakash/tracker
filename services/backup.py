@@ -106,7 +106,6 @@ def list_backups() -> list[dict]:
             created = datetime.fromtimestamp(os.path.getctime(path))
             backups.append({
                 "name": name,
-                "path": path,
                 "size_mb": round(size / (1024 * 1024), 2),
                 "created": created.strftime("%Y-%m-%d %H:%M"),
             })
