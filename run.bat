@@ -1,4 +1,4 @@
 @echo off
 cd /d %~dp0
 call .venv\Scripts\activate
-streamlit run app.py
+python -m uvicorn server:app --host 127.0.0.1 --port 8501
