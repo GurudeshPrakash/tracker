@@ -30,6 +30,7 @@ export function App() {
   const [subtaskParentId, setSubtaskParentId] = useState<number | null>(null);
   const [isDailyUpdateOpen, setIsDailyUpdateOpen] = useState(false);
   const [isLogSessionOpen, setIsLogSessionOpen] = useState(false);
+  const [logDuration, setLogDuration] = useState<number>(30);
 
   const loadData = async () => {
     try {
@@ -153,12 +154,18 @@ export function App() {
                 <BentoHero
                   streak={dashboardData.streak}
                   goals={dashboardData.goals}
+                  doneCount={dashboardData.done_count}
+                  plannedCount={dashboardData.planned_count}
+                  studyMin={dashboardData.study_min}
                 />
 
                 {/* 3. Active Learning Bento (Right) */}
                 <ActiveLearningBento
                   recentSessions={dashboardData.recent_sessions}
-                  onOpenLogModal={() => setIsLogSessionOpen(true)}
+                  onOpenLogModal={(mins) => {
+                    setLogDuration(mins || 30);
+                    setIsLogSessionOpen(true);
+                  }}
                 />
 
                 {/* 4. Weekly Mini-Stats (Bottom Row) */}
@@ -166,6 +173,8 @@ export function App() {
                   doneCount={dashboardData.done_count}
                   plannedCount={dashboardData.planned_count}
                   studyMin={dashboardData.study_min}
+                  completionSeries={dashboardData.completion_series}
+                  skillSeries={dashboardData.skill_series}
                 />
               </div>
             )}
@@ -227,6 +236,7 @@ export function App() {
 
       {isLogSessionOpen && (
         <LogSessionModal
+          initialDurationMin={logDuration}
           onClose={() => setIsLogSessionOpen(false)}
           onSuccess={loadData}
         />

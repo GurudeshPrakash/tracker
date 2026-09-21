@@ -5,9 +5,18 @@ import { GoalItem } from '../types';
 interface BentoHeroProps {
   streak: number;
   goals: GoalItem[];
+  doneCount: number;
+  plannedCount: number;
+  studyMin: number;
 }
 
-export const BentoHero: React.FC<BentoHeroProps> = ({ streak, goals }) => {
+export const BentoHero: React.FC<BentoHeroProps> = ({
+  streak,
+  goals,
+  doneCount,
+  plannedCount,
+  studyMin,
+}) => {
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return 'Good Morning';
@@ -15,21 +24,50 @@ export const BentoHero: React.FC<BentoHeroProps> = ({ streak, goals }) => {
     return 'Good Evening';
   };
 
-  // Determine top 2 goals or fallback to skills / focus metrics
-  const goal1 = goals[0] || {
-    goal: { title: 'Skills Mastery' },
-    progress: { percent: 78 },
-  };
-  const goal2 = goals[1] || {
-    goal: { title: 'Productivity (Focus)' },
-    progress: { percent: 84 },
+  // Real ring data calculation
+  const todayTaskPercent = plannedCount > 0 ? Math.round((doneCount / plannedCount) * 100) : 0;
+  const todayStudyPercent = Math.min(Math.round((studyMin / 60) * 100), 100);
+
+  let ring1 = {
+    title: 'Daily Tasks',
+    subtitle: `${doneCount} of ${plannedCount} Done`,
+    percent: todayTaskPercent,
+    color: '#06b6d4',
   };
 
-  // SVG ring circumference for r=38
+  let ring2 = {
+    title: 'Daily Study',
+    subtitle: `${studyMin}m / 60m Target`,
+    percent: todayStudyPercent,
+    color: '#ec4899',
+  };
+
+  if (goals.length >= 2) {
+    ring1 = {
+      title: goals[0].goal.title,
+      subtitle: `${goals[0].progress.done_hours.toFixed(1)}h / ${goals[0].goal.target_hours}h`,
+      percent: Math.min(Math.round(goals[0].progress.percent), 100),
+      color: '#06b6d4',
+    };
+    ring2 = {
+      title: goals[1].goal.title,
+      subtitle: `${goals[1].progress.done_hours.toFixed(1)}h / ${goals[1].goal.target_hours}h`,
+      percent: Math.min(Math.round(goals[1].progress.percent), 100),
+      color: '#ec4899',
+    };
+  } else if (goals.length === 1) {
+    ring1 = {
+      title: goals[0].goal.title,
+      subtitle: `${goals[0].progress.done_hours.toFixed(1)}h / ${goals[0].goal.target_hours}h`,
+      percent: Math.min(Math.round(goals[0].progress.percent), 100),
+      color: '#06b6d4',
+    };
+  }
+
   const radius = 38;
   const circumference = 2 * Math.PI * radius;
-  const offset1 = circumference - (Math.min(goal1.progress.percent, 100) / 100) * circumference;
-  const offset2 = circumference - (Math.min(goal2.progress.percent, 100) / 100) * circumference;
+  const offset1 = circumference - (ring1.percent / 100) * circumference;
+  const offset2 = circumference - (ring2.percent / 100) * circumference;
 
   return (
     <div
@@ -48,11 +86,11 @@ export const BentoHero: React.FC<BentoHeroProps> = ({ streak, goals }) => {
           {getGreeting()}, Explorer!
         </h2>
         <div style={{ fontSize: '0.85rem', color: '#94a3b8' }}>
-          Your daily momentum and milestone tracking
+          Real-time productivity momentum and milestone tracking
         </div>
       </div>
 
-      {/* Daily Streak Section matching concept */}
+      {/* Daily Streak Section */}
       <div style={{ margin: '1.25rem 0' }}>
         <div style={{ fontSize: '0.8rem', fontWeight: '600', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.4rem' }}>
           Daily Streak
@@ -76,7 +114,7 @@ export const BentoHero: React.FC<BentoHeroProps> = ({ streak, goals }) => {
         {/* Streak Track */}
         <div style={{ width: '100%', height: '8px', background: 'rgba(255, 255, 255, 0.06)', borderRadius: '9999px', overflow: 'hidden' }}>
           <div style={{
-            width: `${Math.min(Math.max(streak * 7, 15), 100)}%`,
+            width: `${Math.min(streak > 0 ? Math.max(streak * 7, 10) : 0, 100)}%`,
             height: '100%',
             background: 'linear-gradient(90deg, #f97316 0%, #fbbf24 100%)',
             boxShadow: '0 0 12px rgba(249, 115, 22, 0.5)',
@@ -89,7 +127,7 @@ export const BentoHero: React.FC<BentoHeroProps> = ({ streak, goals }) => {
       {/* Goal Rings: Progress */}
       <div>
         <div style={{ fontSize: '0.8rem', fontWeight: '600', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.75rem' }}>
-          Goal Rings: Progress
+          Goal Rings: Live Progress
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', gap: '1rem' }}>
@@ -109,13 +147,13 @@ export const BentoHero: React.FC<BentoHeroProps> = ({ streak, goals }) => {
                   cx="45"
                   cy="45"
                   r={radius}
-                  stroke="#06b6d4"
+                  stroke={ring1.color}
                   strokeWidth="8"
                   fill="transparent"
                   strokeDasharray={circumference}
                   strokeDashoffset={offset1}
                   strokeLinecap="round"
-                  style={{ filter: 'drop-shadow(0 0 8px #06b6d4)', transition: 'stroke-dashoffset 0.8s ease' }}
+                  style={{ filter: `drop-shadow(0 0 8px ${ring1.color})`, transition: 'stroke-dashoffset 0.8s ease' }}
                 />
               </svg>
               <div style={{
@@ -131,14 +169,14 @@ export const BentoHero: React.FC<BentoHeroProps> = ({ streak, goals }) => {
                 fontSize: '1.15rem',
                 color: '#f8fafc',
               }}>
-                {Math.round(goal1.progress.percent)}%
+                {ring1.percent}%
               </div>
             </div>
             <div>
-              <div style={{ fontWeight: '700', fontSize: '0.95rem', color: '#f8fafc' }}>
-                {goal1.goal.title}
+              <div style={{ fontWeight: '700', fontSize: '0.95rem', color: '#f8fafc', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {ring1.title}
               </div>
-              <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Target Pace</div>
+              <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{ring1.subtitle}</div>
             </div>
           </div>
 
@@ -158,13 +196,13 @@ export const BentoHero: React.FC<BentoHeroProps> = ({ streak, goals }) => {
                   cx="45"
                   cy="45"
                   r={radius}
-                  stroke="#ec4899"
+                  stroke={ring2.color}
                   strokeWidth="8"
                   fill="transparent"
                   strokeDasharray={circumference}
                   strokeDashoffset={offset2}
                   strokeLinecap="round"
-                  style={{ filter: 'drop-shadow(0 0 8px #ec4899)', transition: 'stroke-dashoffset 0.8s ease' }}
+                  style={{ filter: `drop-shadow(0 0 8px ${ring2.color})`, transition: 'stroke-dashoffset 0.8s ease' }}
                 />
               </svg>
               <div style={{
@@ -180,14 +218,14 @@ export const BentoHero: React.FC<BentoHeroProps> = ({ streak, goals }) => {
                 fontSize: '1.15rem',
                 color: '#f8fafc',
               }}>
-                {Math.round(goal2.progress.percent)}%
+                {ring2.percent}%
               </div>
             </div>
             <div>
-              <div style={{ fontWeight: '700', fontSize: '0.95rem', color: '#f8fafc' }}>
-                {goal2.goal.title}
+              <div style={{ fontWeight: '700', fontSize: '0.95rem', color: '#f8fafc', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {ring2.title}
               </div>
-              <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>Weekly Goal</div>
+              <div style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{ring2.subtitle}</div>
             </div>
           </div>
         </div>

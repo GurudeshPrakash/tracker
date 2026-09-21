@@ -75,6 +75,8 @@ export interface TodayDashboardData {
   suggestions: Suggestion[];
   goals: GoalItem[];
   recent_sessions: RecentSessionItem[];
+  completion_series?: { date: string; rate: number }[];
+  skill_series?: { skill: string; minutes: number }[];
 }
 
 export interface DailyUpdatePrefill {

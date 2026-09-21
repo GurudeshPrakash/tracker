@@ -178,6 +178,10 @@ def get_today_dashboard():
                 "resource": item.resource if item else "",
             })
 
+        # Real weekly stats for mini-charts
+        cr_series = stats.completion_rate_series(seven_days_ago, today_iso, conn).to_dict(orient="records")
+        skill_series = stats.study_minutes_by_skill(seven_days_ago, today_iso, conn).to_dict(orient="records")
+
         # Attach subtasks to todo tasks
         todo_with_subtasks = []
         for t in todo_tasks:
@@ -199,7 +203,15 @@ def get_today_dashboard():
         "suggestions": [asdict(s) for s in suggestions],
         "goals": goals_progress,
         "recent_sessions": recent_sessions,
+        "completion_series": cr_series,
+        "skill_series": skill_series,
     }
+
+
+@app.get("/api/health")
+def health_check():
+    """Deployment health check probe."""
+    return {"status": "ok", "app": "flux-tracker", "date": today()}
 
 
 @app.post("/api/tasks")
