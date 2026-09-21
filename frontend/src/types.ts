@@ -100,7 +100,6 @@ export interface LearningItem {
 
 export interface BackupInfo {
   name: string;
-  path: string;
   size_mb: number;
   created: string;
 }
@@ -136,12 +135,8 @@ export interface RecurringTaskForm {
 export interface NotificationSettings {
   morning_time: string;
   evening_time: string;
-  project_root: string;
-  python_exe: string;
-  notify_script: string;
   schtasks_morning_cmd: string;
   schtasks_evening_cmd: string;
-  log_file: string;
   recent_logs: string[];
 }
 
@@ -149,9 +144,10 @@ export interface SettingsData {
   backups: BackupInfo[];
   recurring_tasks: RecurringTask[];
   system_info: {
+    status: string;
+    storage_engine: string;
     sqlite_version: string;
-    database_path: string;
-    backup_dir: string;
+    security_shield: string;
     table_counts: {
       tasks: number;
       sessions: number;
@@ -161,4 +157,5 @@ export interface SettingsData {
     };
   };
 }
+
 
