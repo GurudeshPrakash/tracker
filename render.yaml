@@ -2,7 +2,7 @@ services:
   - type: web
     name: flux-tracker
     runtime: docker
-    plan: standard
+    plan: starter
     region: oregon
     healthCheckPath: /api/health
     disk:
