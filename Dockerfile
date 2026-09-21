@@ -29,13 +29,14 @@ COPY db/ ./db/
 COPY lib/ ./lib/
 COPY services/ ./services/
 COPY pages/ ./pages/
+COPY reminders/ ./reminders/
 COPY app.py server.py ./
 
 # Copy built frontend assets
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
-# Create persistent data directory
-RUN mkdir -p /app/data
+# Create persistent data and backup directories
+RUN mkdir -p /app/data /app/backups
 
 # Expose port
 EXPOSE 8501
