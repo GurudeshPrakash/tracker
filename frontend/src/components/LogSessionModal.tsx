@@ -4,14 +4,15 @@ import { logStudySession, fetchLearningData } from '../api';
 import { LearningItem } from '../types';
 
 interface LogSessionModalProps {
+  initialDurationMin?: number;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-export const LogSessionModal: React.FC<LogSessionModalProps> = ({ onClose, onSuccess }) => {
+export const LogSessionModal: React.FC<LogSessionModalProps> = ({ initialDurationMin = 30, onClose, onSuccess }) => {
   const [items, setItems] = useState<LearningItem[]>([]);
   const [selectedItemId, setSelectedItemId] = useState<number | ''>('');
-  const [duration, setDuration] = useState<number>(30);
+  const [duration, setDuration] = useState<number>(initialDurationMin);
   const [takeaway, setTakeaway] = useState<string>('');
   const [confidence, setConfidence] = useState<number>(4);
   const [loading, setLoading] = useState<boolean>(false);
