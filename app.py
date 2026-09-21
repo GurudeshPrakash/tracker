@@ -1,23 +1,23 @@
-"""Streamlit entry point: startup tasks + home dashboard."""
+"""Streamlit entry point: startup tasks + modern command center dashboard."""
 
 import streamlit as st
 
-st.set_page_config(page_title="Tracker", page_icon="✅", layout="wide")
+st.set_page_config(page_title="Tracker | Command Center", page_icon="⚡", layout="wide")
+
+from lib.ui import inject_custom_css, render_metric_card, format_minutes
+inject_custom_css()
 
 from lib.dates import today, add_days
 from db.connection import get_conn
 from db.migrations import run_migrations
-from services import rollover, stats
-from services import backup
-from services import recurring
+from services import rollover, stats, backup, recurring
+from db import repository as repo
+from services import goals as goal_svc
 
 
 @st.cache_resource
 def startup(_today_iso: str):
-    """Run once per day: migrations, backup, recurring tasks, rollover.
-
-    Passing the date as the cache key means startup re-runs after midnight.
-    """
+    """Run once per day: migrations, backup, recurring tasks, rollover."""
     with get_conn() as conn:
         run_migrations(conn)
     with get_conn() as conn:
@@ -29,33 +29,35 @@ def startup(_today_iso: str):
     return True
 
 
-# Run startup
+# Run startup tasks
 today_iso = today()
 startup(today_iso)
 
 # ---------------------------------------------------------------------------
-# Home Dashboard
+# Header & Hero Banner
 # ---------------------------------------------------------------------------
-st.title("✅ Daily Work & Self-Learning Tracker")
-st.markdown(f"### 📅 {today_iso}")
+st.markdown(
+    f"""
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: 1.5rem;">
+        <div>
+            <h1 style="margin: 0; padding: 0;">⚡ Focus Command Center</h1>
+            <div style="color: #94a3b8; font-size: 0.95rem; margin-top: 0.25rem;">
+                Empower your productivity & continuous mastery &bull; <b>{today_iso}</b>
+            </div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-# Dashboard metrics
-col1, col2, col3, col4 = st.columns(4)
-
+# Fetch metrics
 with get_conn() as conn:
-    # Streak
     streak = stats.update_streak(today_iso, conn)
-
-    # Tasks done today vs planned
-    from db import repository as repo
     done_today = repo.count_completed_for_date(conn, today_iso)
-    planned_today = len(repo.get_todo_tasks_for_date(conn, today_iso)) + done_today
-
-    # Study minutes today
+    todo_tasks = repo.get_todo_tasks_for_date(conn, today_iso)
+    planned_today = len(todo_tasks) + done_today
     study_min = repo.study_minutes_for_date(conn, today_iso)
 
-    # Behind goals
-    from services import goals as goal_svc
     active_goals = repo.get_active_goals(conn)
     behind_goals = []
     for g in active_goals:
@@ -63,41 +65,97 @@ with get_conn() as conn:
         if progress["status"] == "behind":
             behind_goals.append((g, progress))
 
-with col1:
-    st.metric("🔥 Streak", f"{streak} day{'s' if streak != 1 else ''}")
+# Metric Cards Row
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    render_metric_card("Current Streak", f"{streak}d", "Consecutive days with updates", "🔥")
+with c2:
+    pct = int((done_today / planned_today) * 100) if planned_today > 0 else 0
+    render_metric_card("Tasks Completed", f"{done_today} / {planned_today}", f"{pct}% of today's plan finished", "✅")
+with c3:
+    render_metric_card("Learning Time", format_minutes(study_min), "Dedicated focused study", "📚")
+with c4:
+    alert_sub = f"{len(behind_goals)} goals need attention" if behind_goals else "All active goals on schedule!"
+    render_metric_card("Goals Behind", str(len(behind_goals)), alert_sub, "🎯")
 
-with col2:
-    st.metric("✅ Done Today", f"{done_today} / {planned_today}")
-
-with col3:
-    from lib.ui import format_minutes
-    st.metric("📚 Study Today", format_minutes(study_min))
-
-with col4:
-    st.metric("🎯 Behind Goals", len(behind_goals))
-
-# Behind goals warning
+# Behind goals warning if any
 if behind_goals:
-    st.markdown("---")
-    st.subheader("⚠️ Goals Behind Schedule")
+    st.markdown(
+        """
+        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 14px; padding: 1rem 1.25rem; margin: 1.25rem 0;">
+            <div style="color: #f87171; font-weight: 700; margin-bottom: 0.4rem; display: flex; align-items: center; gap: 0.5rem;">
+                ⚠️ Focus Needed: Active Goals Falling Behind Pace
+            </div>
+        """,
+        unsafe_allow_html=True,
+    )
     for g, prog in behind_goals:
-        st.warning(
-            f"**{g.title}**: {prog['done_hours']:.1f}h / {g.target_hours}h "
-            f"({prog['percent']:.0f}%)"
+        st.markdown(
+            f"""
+            <div style="color: #cbd5e1; font-size: 0.9rem; padding: 0.2rem 0;">
+                &bull; <b style="color: #ffffff;">{g.title}</b>: {prog['done_hours']:.1f}h done of {g.target_hours}h target ({prog['percent']:.0f}% completed)
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+    st.markdown("</div>", unsafe_allow_html=True)
 
-st.markdown("---")
+st.markdown("<div style='height: 1.25rem;'></div>", unsafe_allow_html=True)
 
-# Navigation hint
-st.info("👈 Use the sidebar to navigate between pages, or click below to get started.")
+# Quick Nav Cards
+st.subheader("🚀 Quick Actions")
+nav_col1, nav_col2, nav_col3 = st.columns(3)
 
-col_a, col_b, col_c = st.columns(3)
-with col_a:
-    if st.button("📋 Plan Today", use_container_width=True):
-        st.switch_page("pages/1_Today.py")
-with col_b:
-    if st.button("📝 Daily Update", use_container_width=True):
-        st.switch_page("pages/2_Daily_Update.py")
-with col_c:
-    if st.button("📚 Learning", use_container_width=True):
-        st.switch_page("pages/3_Learning.py")
+with nav_col1:
+    with st.container():
+        st.markdown(
+            """
+            <div class="tracker-card" style="height: 125px;">
+                <div style="font-weight: 700; font-size: 1.1rem; color: #f8fafc; margin-bottom: 0.35rem;">
+                    📋 Daily Execution Board
+                </div>
+                <div style="font-size: 0.85rem; color: #94a3b8;">
+                    Manage Top-3 priorities, tackle tasks, and track subtask items for today.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Open Today's Tasks →", key="nav_today", use_container_width=True, type="primary"):
+            st.switch_page("pages/1_Today.py")
+
+with nav_col2:
+    with st.container():
+        st.markdown(
+            """
+            <div class="tracker-card" style="height: 125px;">
+                <div style="font-weight: 700; font-size: 1.1rem; color: #f8fafc; margin-bottom: 0.35rem;">
+                    📝 Evening Daily Reflection
+                </div>
+                <div style="font-size: 0.85rem; color: #94a3b8;">
+                    Close out your day, log takeaways, preserve streak, and choose carried tasks.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Open Daily Update →", key="nav_daily", use_container_width=True):
+            st.switch_page("pages/2_Daily_Update.py")
+
+with nav_col3:
+    with st.container():
+        st.markdown(
+            """
+            <div class="tracker-card" style="height: 125px;">
+                <div style="font-weight: 700; font-size: 1.1rem; color: #f8fafc; margin-bottom: 0.35rem;">
+                    📚 Skill Mastery & Review
+                </div>
+                <div style="font-size: 0.85rem; color: #94a3b8;">
+                    Log deep study sessions, track resources, and review spaced repetition takeaways.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button("Explore Learning Hub →", key="nav_learning", use_container_width=True):
+            st.switch_page("pages/3_Learning.py")

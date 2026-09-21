@@ -1,0 +1,295 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* Global Reset & Typography */
+html, body, [class*="css"] {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+/* Base App Background */
+.stApp {
+    background: radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 85% 25%, rgba(236, 72, 153, 0.06) 0%, transparent 35%),
+                radial-gradient(circle at 50% 85%, rgba(16, 185, 129, 0.05) 0%, transparent 50%),
+                #0b0d14 !important;
+    color: #e2e8f0 !important;
+}
+
+/* Sidebar Modernization */
+[data-testid="stSidebar"] {
+    background: rgba(13, 16, 26, 0.85) !important;
+    backdrop-filter: blur(20px) !important;
+    border-right: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] {
+    padding-top: 1rem;
+}
+
+/* Top App Header / Toolbar */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+}
+
+/* Headers */
+h1 {
+    font-size: 2.2rem !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.025em !important;
+    background: linear-gradient(135deg, #ffffff 0%, #cbd5e1 50%, #94a3b8 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.5rem !important;
+}
+
+h2 {
+    font-size: 1.5rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.015em !important;
+    color: #f1f5f9 !important;
+    margin-top: 1.25rem !important;
+}
+
+h3 {
+    font-size: 1.15rem !important;
+    font-weight: 600 !important;
+    color: #cbd5e1 !important;
+}
+
+/* Metrics Cards Overhaul */
+[data-testid="stMetric"] {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.07) !important;
+    border-radius: 16px !important;
+    padding: 1.1rem 1.25rem !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3) !important;
+    backdrop-filter: blur(12px) !important;
+    transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+[data-testid="stMetric"]:hover {
+    transform: translateY(-3px) !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+    border-color: rgba(99, 102, 241, 0.4) !important;
+    box-shadow: 0 15px 30px -5px rgba(99, 102, 241, 0.15) !important;
+}
+
+[data-testid="stMetricLabel"] {
+    font-size: 0.82rem !important;
+    font-weight: 600 !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.05em !important;
+    color: #94a3b8 !important;
+}
+
+[data-testid="stMetricValue"] {
+    font-size: 1.9rem !important;
+    font-weight: 800 !important;
+    color: #f8fafc !important;
+    letter-spacing: -0.02em !important;
+}
+
+/* Interactive Cards / Containers */
+.tracker-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 16px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+    backdrop-filter: blur(12px);
+    transition: all 0.2s ease;
+}
+
+.tracker-card:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.top3-highlight-card {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.06) 0%, rgba(217, 119, 6, 0.02) 100%) !important;
+    border: 1px solid rgba(245, 158, 11, 0.25) !important;
+    border-radius: 16px !important;
+    padding: 1.2rem !important;
+    margin-bottom: 1.25rem !important;
+    box-shadow: 0 8px 25px rgba(245, 158, 11, 0.08) !important;
+}
+
+/* Status & Category Pills */
+.badge-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.25rem 0.65rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.pill-high {
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.pill-medium {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fcd34d;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.pill-low {
+    background: rgba(16, 185, 129, 0.15);
+    color: #6ee7b7;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.pill-work {
+    background: rgba(59, 130, 246, 0.15);
+    color: #93c5fd;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.pill-learning {
+    background: rgba(168, 85, 247, 0.15);
+    color: #d8b4fe;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+}
+
+.pill-personal {
+    background: rgba(20, 184, 166, 0.15);
+    color: #5eead4;
+    border: 1px solid rgba(20, 184, 166, 0.3);
+}
+
+.pill-rollover {
+    background: rgba(225, 29, 72, 0.18);
+    color: #fda4af;
+    border: 1px solid rgba(225, 29, 72, 0.4);
+    font-weight: 700;
+}
+
+/* Modern Streamlit Buttons */
+button[kind="primary"], [data-testid="baseButton-primary"] {
+    background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%) !important;
+    color: #ffffff !important;
+    border: none !important;
+    border-radius: 12px !important;
+    padding: 0.6rem 1.25rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.01em !important;
+    box-shadow: 0 4px 14px rgba(79, 70, 229, 0.35) !important;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+button[kind="primary"]:hover, [data-testid="baseButton-primary"]:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 6px 20px rgba(79, 70, 229, 0.5) !important;
+}
+
+button[kind="secondary"], [data-testid="baseButton-secondary"] {
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    color: #e2e8f0 !important;
+    border-radius: 12px !important;
+    padding: 0.55rem 1.15rem !important;
+    font-weight: 500 !important;
+    transition: all 0.2s ease !important;
+}
+
+button[kind="secondary"]:hover, [data-testid="baseButton-secondary"]:hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+    border-color: rgba(255, 255, 255, 0.2) !important;
+    color: #ffffff !important;
+    transform: translateY(-1px) !important;
+}
+
+/* Form Inputs & Selectboxes */
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-testid="stTextArea"] textarea,
+[data-testid="stSelectbox"] > div > div {
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: 12px !important;
+    color: #f8fafc !important;
+    transition: all 0.2s ease !important;
+}
+
+[data-testid="stTextInput"] input:focus,
+[data-testid="stNumberInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus,
+[data-testid="stSelectbox"] > div > div:focus-within {
+    border-color: #6366f1 !important;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25) !important;
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Tabs Styling */
+[data-testid="stTabs"] [data-baseweb="tab-list"] {
+    background: rgba(255, 255, 255, 0.02) !important;
+    border-radius: 14px !important;
+    padding: 0.35rem !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    gap: 0.5rem !important;
+}
+
+[data-testid="stTabs"] [data-baseweb="tab"] {
+    border-radius: 10px !important;
+    color: #94a3b8 !important;
+    font-weight: 600 !important;
+    padding: 0.6rem 1.25rem !important;
+    border: none !important;
+    transition: all 0.2s ease !important;
+}
+
+[data-testid="stTabs"] [data-baseweb="tab"][aria-selected="true"] {
+    background: rgba(99, 102, 241, 0.15) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(99, 102, 241, 0.3) !important;
+}
+
+/* Progress Bar Customization */
+[data-testid="stProgress"] > div > div {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-radius: 9999px !important;
+    height: 10px !important;
+}
+
+[data-testid="stProgress"] > div > div > div {
+    background: linear-gradient(90deg, #6366f1 0%, #10b981 100%) !important;
+    border-radius: 9999px !important;
+}
+
+/* Alerts / Info Boxes */
+[data-testid="stAlert"] {
+    border-radius: 14px !important;
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+    background: rgba(255, 255, 255, 0.025) !important;
+    backdrop-filter: blur(10px) !important;
+}
+
+/* Dialog / Modal Overrides */
+[data-testid="stDialog"] {
+    border-radius: 20px !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    background: rgba(17, 21, 34, 0.96) !important;
+    backdrop-filter: blur(24px) !important;
+    box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+::-webkit-scrollbar-track {
+    background: rgba(0, 0, 0, 0.1);
+}
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
+}

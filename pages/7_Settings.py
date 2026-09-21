@@ -8,6 +8,9 @@ import streamlit as st
 
 st.set_page_config(page_title="Settings | Tracker", page_icon="⚙️", layout="wide")
 
+from lib.ui import inject_custom_css
+inject_custom_css()
+
 from lib.dates import today
 from db.connection import get_conn
 from db import repository as repo
@@ -18,7 +21,15 @@ from services import recurring as rec_svc
 today_iso = today()
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-st.title("⚙️ Settings")
+st.markdown(
+    """
+    <h1 style="margin: 0; padding: 0;">⚙️ System Configuration & Tools</h1>
+    <div style="color: #94a3b8; font-size: 0.95rem; margin-top: 0.2rem; margin-bottom: 1.25rem;">
+        Database snapshots, automated recurring rules, data export, and notification hooks.
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 tab1, tab2, tab3, tab4 = st.tabs(["Backups", "Recurring Tasks", "Export/Import", "Reminders"])
 
