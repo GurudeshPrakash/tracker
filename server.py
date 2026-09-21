@@ -7,13 +7,18 @@ modern TypeScript Bento-Grid Single-Page Application (and provides static asset 
 from __future__ import annotations
 
 import os
+import sys
+import csv
+import io
+import json
 import sqlite3
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import date as dt_date, timedelta
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, Query, Body
+from fastapi import FastAPI, HTTPException, Query, Body, Response, UploadFile, File
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -137,6 +142,40 @@ class ReviewCreateRequest(BaseModel):
     wins: Optional[str] = None
     blockers: Optional[str] = None
     next_focus: Optional[str] = None
+
+class RecurringCreateRequest(BaseModel):
+    title: str
+    rule: str  # 'daily', 'weekdays', 'weekly', 'monthly'
+    start_date: str
+    priority: str = "medium"
+    category: str = "work"
+    goal_id: Optional[int] = None
+    learning_item_id: Optional[int] = None
+    estimated_min: Optional[int] = None
+    weekday: Optional[int] = None
+    day_of_month: Optional[int] = None
+    end_date: Optional[str] = None
+
+class RecurringUpdateRequest(BaseModel):
+    title: Optional[str] = None
+    rule: Optional[str] = None
+    start_date: Optional[str] = None
+    priority: Optional[str] = None
+    category: Optional[str] = None
+    goal_id: Optional[int] = None
+    learning_item_id: Optional[int] = None
+    estimated_min: Optional[int] = None
+    weekday: Optional[int] = None
+    day_of_month: Optional[int] = None
+    end_date: Optional[str] = None
+    active: Optional[int] = None
+
+class BackupRestoreRequest(BaseModel):
+    filename: str
+
+class RecurringGenerateRequest(BaseModel):
+    date: Optional[str] = None
+
 
 # ---------------------------------------------------------------------------
 # API Endpoints
@@ -601,7 +640,7 @@ def save_review(req: ReviewCreateRequest):
 
 
 # ---------------------------------------------------------------------------
-# Settings & Backups
+# Settings, Backups, Recurring, Exports & Automation
 # ---------------------------------------------------------------------------
 
 @app.get("/api/settings")
@@ -609,10 +648,32 @@ def get_settings():
     with get_conn() as conn:
         backups = backup.list_backups()
         recurring = rec_svc.get_all(conn)
+        task_count = conn.execute("SELECT COUNT(*) FROM task").fetchone()[0]
+        session_count = conn.execute("SELECT COUNT(*) FROM learning_session").fetchone()[0]
+        goal_count = conn.execute("SELECT COUNT(*) FROM goal").fetchone()[0]
+        update_count = conn.execute("SELECT COUNT(*) FROM daily_update").fetchone()[0]
+
     return {
         "backups": backups,
         "recurring_tasks": [asdict(r) for r in recurring],
+        "system_info": {
+            "sqlite_version": sqlite3.sqlite_version,
+            "database_path": backup.DB_PATH,
+            "backup_dir": backup.BACKUP_DIR,
+            "table_counts": {
+                "tasks": task_count,
+                "sessions": session_count,
+                "goals": goal_count,
+                "updates": update_count,
+                "recurring": len(recurring),
+            },
+        },
     }
+
+
+@app.get("/api/backups")
+def get_backups():
+    return backup.list_backups()
 
 
 @app.post("/api/backups")
@@ -622,6 +683,221 @@ def trigger_backup():
         return {"success": True, "filename": os.path.basename(path)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/backups/{filename}/download")
+def download_backup(filename: str):
+    if not filename.endswith(".db") or "/" in filename or "\\" in filename or ".." in filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = os.path.join(backup.BACKUP_DIR, filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Backup file not found")
+    return FileResponse(path, filename=filename, media_type="application/x-sqlite3")
+
+
+@app.post("/api/backups/restore")
+def restore_backup(req: BackupRestoreRequest):
+    if not req.filename.endswith(".db") or "/" in req.filename or "\\" in req.filename or ".." in req.filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    path = os.path.join(backup.BACKUP_DIR, req.filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Backup file not found")
+    try:
+        backup.restore_from(path)
+        return {"success": True, "message": f"Database restored successfully from {req.filename}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/backups/upload")
+async def upload_and_restore_backup(file: UploadFile = File(...)):
+    if not file.filename.endswith(".db"):
+        raise HTTPException(status_code=400, detail="File must be a SQLite .db file")
+    try:
+        contents = await file.read()
+        backup.restore_from(contents)
+        return {"success": True, "message": f"Database restored from uploaded file: {file.filename}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Recurring Task Endpoints
+@app.get("/api/recurring")
+def get_recurring_tasks():
+    with get_conn() as conn:
+        tasks = rec_svc.get_all(conn)
+    return [asdict(t) for t in tasks]
+
+
+@app.post("/api/recurring")
+def create_recurring_task(req: RecurringCreateRequest):
+    with get_conn() as conn:
+        rid = rec_svc.create(
+            conn,
+            title=req.title.strip(),
+            rule=req.rule,
+            start_date=req.start_date,
+            priority=req.priority,
+            category=req.category,
+            goal_id=req.goal_id,
+            learning_item_id=req.learning_item_id,
+            estimated_min=req.estimated_min,
+            weekday=req.weekday,
+            day_of_month=req.day_of_month,
+            end_date=req.end_date,
+        )
+        tasks = rec_svc.get_all(conn)
+        created = next((t for t in tasks if t.id == rid), None)
+    return asdict(created) if created else {"id": rid}
+
+
+@app.put("/api/recurring/{rec_id}")
+def update_recurring_task(rec_id: int, req: RecurringUpdateRequest):
+    updates = {k: v for k, v in req.model_dump().items() if v is not None}
+    with get_conn() as conn:
+        rec_svc.update(conn, rec_id, **updates)
+        tasks = rec_svc.get_all(conn)
+        updated = next((t for t in tasks if t.id == rec_id), None)
+    return asdict(updated) if updated else {"success": True}
+
+
+@app.delete("/api/recurring/{rec_id}")
+def delete_recurring_task(rec_id: int):
+    with get_conn() as conn:
+        rec_svc.delete(conn, rec_id)
+    return {"success": True}
+
+
+@app.post("/api/recurring/generate")
+def generate_recurring_tasks(req: Optional[RecurringGenerateRequest] = None):
+    target_date = (req.date if req and req.date else None) or today()
+    with get_conn() as conn:
+        count = rec_svc.generate_for_date(target_date, conn)
+    return {"success": True, "date": target_date, "generated_count": count}
+
+
+# Data Export Endpoints
+@app.get("/api/export/csv")
+def export_csv_table(table: str = Query("tasks", regex="^(tasks|sessions|updates|goals)$")):
+    today_iso = today()
+    with get_conn() as conn:
+        if table == "tasks":
+            rows = repo.export_table_as_dicts(conn, "task")
+            filename = f"flux_tasks_{today_iso}.csv"
+        elif table == "sessions":
+            rows = repo.export_table_as_dicts(conn, "learning_session")
+            filename = f"flux_sessions_{today_iso}.csv"
+        elif table == "updates":
+            rows = repo.export_table_as_dicts(conn, "daily_update")
+            filename = f"flux_daily_updates_{today_iso}.csv"
+        elif table == "goals":
+            rows = repo.export_table_as_dicts(conn, "goal")
+            filename = f"flux_goals_{today_iso}.csv"
+        else:
+            rows = []
+            filename = f"flux_export_{today_iso}.csv"
+
+    out = io.StringIO()
+    if rows:
+        writer = csv.DictWriter(out, fieldnames=rows[0].keys())
+        writer.writeheader()
+        writer.writerows(rows)
+    else:
+        out.write("No records found\n")
+
+    return Response(
+        content=out.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.get("/api/export/zip")
+def export_all_tables_zip():
+    today_iso = today()
+    zip_bytes = backup.export_csv_zip()
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="flux_complete_export_{today_iso}.zip"'},
+    )
+
+
+@app.get("/api/export/json")
+def export_database_json():
+    today_iso = today()
+    with get_conn() as conn:
+        table_names = repo.get_all_table_names(conn)
+        dump = {}
+        for tbl in table_names:
+            dump[tbl] = repo.export_table_as_dicts(conn, tbl)
+
+    dump["_metadata"] = {
+        "exported_at": today_iso,
+        "app": "flux-tracker",
+        "sqlite_version": sqlite3.sqlite_version,
+    }
+    json_str = json.dumps(dump, indent=2, default=str)
+    return Response(
+        content=json_str,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="flux_database_dump_{today_iso}.json"'},
+    )
+
+
+# Desktop Notifications & Task Scheduler Setup
+@app.get("/api/settings/notifications")
+def get_notification_settings():
+    root = os.path.dirname(os.path.abspath(__file__))
+    python_exe = sys.executable
+    notify_script = os.path.join(root, "reminders", "notify.py")
+    log_path = os.path.join(root, "data", "notify.log")
+
+    morning_cmd = f'schtasks /create /tn "FluxTracker_Morning" /tr "\"{python_exe}\" \"{notify_script}\" morning" /sc daily /st 09:00 /f'
+    evening_cmd = f'schtasks /create /tn "FluxTracker_Evening" /tr "\"{python_exe}\" \"{notify_script}\" evening" /sc daily /st 21:00 /f'
+
+    recent_logs = []
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, "r", encoding="utf-8") as f:
+                lines = [line.strip() for line in f.readlines() if line.strip()]
+                recent_logs = lines[-15:]
+        except Exception:
+            pass
+
+    return {
+        "morning_time": "09:00",
+        "evening_time": "21:00",
+        "project_root": root,
+        "python_exe": python_exe,
+        "notify_script": notify_script,
+        "schtasks_morning_cmd": morning_cmd,
+        "schtasks_evening_cmd": evening_cmd,
+        "log_file": log_path,
+        "recent_logs": recent_logs,
+    }
+
+
+@app.post("/api/settings/test-notification")
+def trigger_test_notification(mode: str = Query("morning", regex="^(morning|evening)$")):
+    try:
+        from plyer import notification
+        from reminders.notify import _get_morning_message, _get_evening_message
+
+        if mode == "morning":
+            title, message = _get_morning_message()
+        else:
+            res = _get_evening_message()
+            if res is None:
+                title, message = "🌙 Close Your Day", "Notice: Day is already closed, but testing toast works!"
+            else:
+                title, message = res
+
+        notification.notify(title=title, message=message, timeout=10)
+        return {"success": True, "mode": mode, "title": title, "message": message}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Notification error: {str(e)}")
+
 
 
 # ---------------------------------------------------------------------------
