@@ -1,4 +1,14 @@
-import { TodayDashboardData, Task, DailyUpdatePrefill, LearningItem } from './types';
+import {
+  TodayDashboardData,
+  Task,
+  DailyUpdatePrefill,
+  LearningItem,
+  SettingsData,
+  BackupInfo,
+  RecurringTask,
+  RecurringTaskForm,
+  NotificationSettings,
+} from './types';
 
 const BASE = '/api';
 
@@ -172,3 +182,113 @@ export async function fetchStats(start?: string, end?: string): Promise<any> {
   if (!res.ok) throw new Error('Failed to load stats');
   return res.json();
 }
+
+// ---------------------------------------------------------------------------
+// Settings, Backups, Recurring, Exports, & Notifications
+// ---------------------------------------------------------------------------
+
+export async function fetchSettings(): Promise<SettingsData> {
+  const res = await fetch(`${BASE}/settings`);
+  if (!res.ok) throw new Error('Failed to load settings');
+  return res.json();
+}
+
+export async function createBackup(): Promise<{ success: boolean; filename: string }> {
+  const res = await fetch(`${BASE}/backups`, { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to create backup');
+  }
+  return res.json();
+}
+
+export async function restoreBackup(filename: string): Promise<{ success: boolean; message: string }> {
+  const res = await fetch(`${BASE}/backups/restore`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ filename }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to restore backup');
+  }
+  return res.json();
+}
+
+export async function uploadAndRestoreBackup(file: File): Promise<{ success: boolean; message: string }> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${BASE}/backups/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to restore uploaded database');
+  }
+  return res.json();
+}
+
+export async function fetchRecurringTasks(): Promise<RecurringTask[]> {
+  const res = await fetch(`${BASE}/recurring`);
+  if (!res.ok) throw new Error('Failed to load recurring tasks');
+  return res.json();
+}
+
+export async function createRecurringTask(data: RecurringTaskForm): Promise<RecurringTask> {
+  const res = await fetch(`${BASE}/recurring`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to create recurring rule');
+  }
+  return res.json();
+}
+
+export async function updateRecurringTask(id: number, data: Partial<RecurringTask>): Promise<any> {
+  const res = await fetch(`${BASE}/recurring/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to update recurring task');
+  }
+  return res.json();
+}
+
+export async function deleteRecurringTask(id: number): Promise<any> {
+  const res = await fetch(`${BASE}/recurring/${id}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error('Failed to delete recurring rule');
+  return res.json();
+}
+
+export async function triggerRecurringGeneration(date?: string): Promise<{ success: boolean; date: string; generated_count: number }> {
+  const res = await fetch(`${BASE}/recurring/generate`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(date ? { date } : {}),
+  });
+  if (!res.ok) throw new Error('Failed to run recurring generator');
+  return res.json();
+}
+
+export async function fetchNotificationSettings(): Promise<NotificationSettings> {
+  const res = await fetch(`${BASE}/settings/notifications`);
+  if (!res.ok) throw new Error('Failed to load notification settings');
+  return res.json();
+}
+
+export async function testNotification(mode: 'morning' | 'evening'): Promise<{ success: boolean; title: string; message: string }> {
+  const res = await fetch(`${BASE}/settings/test-notification?mode=${mode}`, { method: 'POST' });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || 'Failed to trigger notification');
+  }
+  return res.json();
+}
+

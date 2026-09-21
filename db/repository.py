@@ -600,6 +600,12 @@ def update_recurring_task(conn: sqlite3.Connection, rec_id: int, **fields) -> No
     conn.commit()
 
 
+def delete_recurring_task(conn: sqlite3.Connection, rec_id: int) -> None:
+    conn.execute("DELETE FROM recurring_task WHERE id = ?", (rec_id,))
+    conn.commit()
+
+
+
 def insert_recurring_task_instance(
     conn: sqlite3.Connection,
     recurring: RecurringTask,

@@ -10,6 +10,7 @@ import { LogSessionModal } from './components/LogSessionModal';
 import { GoalsView } from './components/GoalsView';
 import { LearningView } from './components/LearningView';
 import { InsightsView } from './components/InsightsView';
+import { SettingsView } from './components/SettingsView';
 import {
   fetchTodayData,
   completeTask,
@@ -182,35 +183,7 @@ export function App() {
             {activeTab === 'goals' && <GoalsView />}
             {activeTab === 'learning' && <LearningView onOpenLogModal={() => setIsLogSessionOpen(true)} />}
             {activeTab === 'insights' && <InsightsView />}
-            {activeTab === 'settings' && (
-              <div className="bento-card" style={{ maxWidth: '800px', margin: '1rem auto' }}>
-                <h2 style={{ fontSize: '1.5rem', fontWeight: '800', color: '#f8fafc', marginBottom: '1rem' }}>
-                  ⚙️ System Management
-                </h2>
-                <div style={{ color: '#94a3b8', fontSize: '0.9rem', marginBottom: '1.5rem' }}>
-                  Database backups and recurring task schedule configurations
-                </div>
-                <button
-                  onClick={() => {
-                    fetch('/api/backups', { method: 'POST' })
-                      .then((r) => r.json())
-                      .then((d) => alert(`Backup created: ${d.filename}`))
-                      .catch((e) => alert(e.message));
-                  }}
-                  style={{
-                    padding: '0.75rem 1.5rem',
-                    borderRadius: '12px',
-                    border: 'none',
-                    background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)',
-                    color: '#fff',
-                    fontWeight: '700',
-                    cursor: 'pointer',
-                  }}
-                >
-                  📦 Create Instant Database Backup
-                </button>
-              </div>
-            )}
+            {activeTab === 'settings' && <SettingsView />}
           </>
         )}
       </main>

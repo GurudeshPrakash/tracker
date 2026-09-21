@@ -67,3 +67,20 @@ def generate_for_date(date: str, conn: sqlite3.Connection) -> int:
                 count += 1
 
     return count
+
+
+def get_all(conn: sqlite3.Connection):
+    return repo.get_all_recurring_tasks(conn)
+
+
+def create(conn: sqlite3.Connection, **kwargs) -> int:
+    return repo.create_recurring_task(conn, **kwargs)
+
+
+def update(conn: sqlite3.Connection, rec_id: int, **kwargs) -> None:
+    repo.update_recurring_task(conn, rec_id, **kwargs)
+
+
+def delete(conn: sqlite3.Connection, rec_id: int) -> None:
+    repo.delete_recurring_task(conn, rec_id)
+

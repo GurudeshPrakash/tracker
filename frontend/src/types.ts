@@ -97,3 +97,68 @@ export interface LearningItem {
   status: string;
   goal_id?: number | null;
 }
+
+export interface BackupInfo {
+  name: string;
+  path: string;
+  size_mb: number;
+  created: string;
+}
+
+export interface RecurringTask {
+  id: number;
+  title: string;
+  priority: 'high' | 'medium' | 'low';
+  category: 'work' | 'learning' | 'personal';
+  goal_id?: number | null;
+  learning_item_id?: number | null;
+  estimated_min?: number | null;
+  rule: 'daily' | 'weekdays' | 'weekly' | 'monthly';
+  weekday?: number | null;
+  day_of_month?: number | null;
+  start_date: string;
+  end_date?: string | null;
+  active: number;
+}
+
+export interface RecurringTaskForm {
+  title: string;
+  rule: 'daily' | 'weekdays' | 'weekly' | 'monthly';
+  start_date: string;
+  priority: 'high' | 'medium' | 'low';
+  category: 'work' | 'learning' | 'personal';
+  estimated_min?: number | null;
+  weekday?: number | null;
+  day_of_month?: number | null;
+  end_date?: string | null;
+}
+
+export interface NotificationSettings {
+  morning_time: string;
+  evening_time: string;
+  project_root: string;
+  python_exe: string;
+  notify_script: string;
+  schtasks_morning_cmd: string;
+  schtasks_evening_cmd: string;
+  log_file: string;
+  recent_logs: string[];
+}
+
+export interface SettingsData {
+  backups: BackupInfo[];
+  recurring_tasks: RecurringTask[];
+  system_info: {
+    sqlite_version: string;
+    database_path: string;
+    backup_dir: string;
+    table_counts: {
+      tasks: number;
+      sessions: number;
+      goals: number;
+      updates: number;
+      recurring: number;
+    };
+  };
+}
+
