@@ -5,15 +5,22 @@ import { RecentSessionItem } from '../types';
 interface ActiveLearningBentoProps {
   recentSessions: RecentSessionItem[];
   onOpenLogModal: (initialDurationMin?: number) => void;
+  resetKey?: number;
 }
 
 export const ActiveLearningBento: React.FC<ActiveLearningBentoProps> = ({
   recentSessions,
   onOpenLogModal,
+  resetKey = 0,
 }) => {
   // Real live stopwatch starting at 0
   const [seconds, setSeconds] = useState<number>(0);
   const [isRunning, setIsRunning] = useState<boolean>(false);
+
+  useEffect(() => {
+    setSeconds(0);
+    setIsRunning(false);
+  }, [resetKey]);
 
   useEffect(() => {
     let interval: any = null;

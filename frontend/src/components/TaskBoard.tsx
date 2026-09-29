@@ -1,31 +1,38 @@
 import React, { useState } from 'react';
-import { Plus, Check, Star, Trash2, GitBranch, MoreVertical } from 'lucide-react';
-import { Task } from '../types';
+import { Plus, Check, Star, Trash2, GitBranch, Lightbulb } from 'lucide-react';
+import { Suggestion, Task } from '../types';
 
 interface TaskBoardProps {
   tasks: Task[];
   top3: Task[];
   completed: Task[];
+  overdue?: Task[];
+  suggestions?: Suggestion[];
   onComplete: (id: number) => void;
   onUncomplete: (id: number) => void;
   onToggleTop3: (id: number, current: boolean) => void;
   onDrop: (id: number) => void;
   onAddTask: () => void;
   onAddSubtask: (parentId: number) => void;
+  onAcceptSuggestion?: (suggestion: Suggestion) => void;
 }
+
+const PRIORITY_RANK: Record<string, number> = { high: 0, medium: 1, low: 2 };
 
 export const TaskBoard: React.FC<TaskBoardProps> = ({
   tasks,
-  top3,
   completed,
+  overdue = [],
+  suggestions = [],
   onComplete,
   onUncomplete,
   onToggleTop3,
   onDrop,
   onAddTask,
   onAddSubtask,
+  onAcceptSuggestion,
 }) => {
-  const [activeFilter, setActiveFilter] = useState<'all' | 'todo' | 'completed'>('all');
+  const [activeFilter, setActiveFilter] = useState<'all' | 'completed'>('all');
 
   const getPriorityPill = (priority: string) => {
     switch (priority) {
@@ -38,7 +45,21 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({
     }
   };
 
-  const displayedTasks = activeFilter === 'completed' ? completed : tasks;
+  const topLevelTasks = tasks
+    .filter((t) => !t.parent_task_id)
+    .sort((a, b) => {
+      if (Boolean(a.is_top3) !== Boolean(b.is_top3)) return a.is_top3 ? -1 : 1;
+      return (PRIORITY_RANK[a.priority] ?? 1) - (PRIORITY_RANK[b.priority] ?? 1);
+    });
+
+  const displayedTasks = activeFilter === 'completed' ? completed : topLevelTasks;
+
+  const handleDrop = (task: Task) => {
+    const label = task.status === 'done' ? 'remove this completed task' : `drop "${task.title}"`;
+    if (window.confirm(`Drop this item? Unchecked close-out items are dropped too — ${label}.`)) {
+      onDrop(task.id);
+    }
+  };
 
   return (
     <div
@@ -52,18 +73,17 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({
       }}
     >
       <div>
-        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
           <div>
             <h3 style={{ fontSize: '1.25rem', fontWeight: '800', color: '#f8fafc' }}>
               Today's Tasks
             </h3>
             <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-              {tasks.length} pending &bull; {completed.length} completed
+              {topLevelTasks.length} pending &bull; {completed.length} completed
+              {overdue.length > 0 ? ` • ${overdue.length} overdue` : ''}
             </span>
           </div>
 
-          {/* Quick tab toggle */}
           <div style={{
             background: 'rgba(255, 255, 255, 0.04)',
             padding: '0.2rem',
@@ -104,7 +124,62 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({
           </div>
         </div>
 
-        {/* Task List */}
+        {activeFilter === 'all' && suggestions.length > 0 && (
+          <div style={{
+            marginBottom: '0.85rem',
+            padding: '0.75rem',
+            borderRadius: '14px',
+            border: '1px solid rgba(251, 191, 36, 0.25)',
+            background: 'rgba(251, 191, 36, 0.06)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.78rem', fontWeight: 700, color: '#fbbf24', marginBottom: '0.5rem' }}>
+              <Lightbulb size={14} /> Suggested from behind goals
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+              {suggestions.map((s) => (
+                <div key={`${s.goal_id}-${s.title}`} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                  <div>
+                    <div style={{ fontSize: '0.82rem', color: '#f8fafc', fontWeight: 600 }}>{s.title}</div>
+                    <div style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{s.reason}</div>
+                  </div>
+                  {onAcceptSuggestion && (
+                    <button
+                      onClick={() => onAcceptSuggestion(s)}
+                      style={{
+                        flexShrink: 0,
+                        background: 'rgba(251, 191, 36, 0.15)',
+                        border: '1px solid rgba(251, 191, 36, 0.4)',
+                        color: '#fbbf24',
+                        borderRadius: '8px',
+                        padding: '0.3rem 0.55rem',
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Add
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeFilter === 'all' && overdue.length > 0 && (
+          <div style={{
+            marginBottom: '0.85rem',
+            padding: '0.65rem 0.75rem',
+            borderRadius: '12px',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            background: 'rgba(239, 68, 68, 0.08)',
+            fontSize: '0.8rem',
+            color: '#fca5a5',
+          }}>
+            Overdue: {overdue.map((t) => t.title).join(', ')}
+          </div>
+        )}
+
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', maxHeight: '440px', overflowY: 'auto', paddingRight: '0.25rem' }}>
           {displayedTasks.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '2.5rem 1rem', color: '#64748b', fontSize: '0.9rem' }}>
@@ -142,7 +217,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({
                       </span>
                     </div>
 
-                    {/* Actions */}
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                       {!isDone && (
                         <button
@@ -174,23 +248,24 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({
                           <GitBranch size={15} />
                         </button>
                       )}
-                      <button
-                        onClick={() => onDrop(t.id)}
-                        title="Drop task"
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          cursor: 'pointer',
-                          color: '#475569',
-                          padding: '0.2rem',
-                        }}
-                      >
-                        <Trash2 size={15} />
-                      </button>
+                      {!isDone && (
+                        <button
+                          onClick={() => handleDrop(t)}
+                          title="Drop task"
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            cursor: 'pointer',
+                            color: '#475569',
+                            padding: '0.2rem',
+                          }}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Task Checkbox & Title */}
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.75rem' }}>
                     <button
                       onClick={() => (isDone ? onUncomplete(t.id) : onComplete(t.id))}
@@ -223,7 +298,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({
                         {t.title}
                       </div>
 
-                      {/* Rollover alert */}
                       {t.rollover_count >= 3 && !isDone && (
                         <div style={{ marginTop: '0.3rem' }}>
                           <span className="pill-rollover-warning">
@@ -232,14 +306,40 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({
                         </div>
                       )}
 
-                      {/* Subtasks */}
                       {t.subtasks && t.subtasks.length > 0 && (
                         <div style={{ marginTop: '0.5rem', paddingLeft: '0.5rem', borderLeft: '2px solid rgba(255,255,255,0.06)' }}>
-                          {t.subtasks.map((sub) => (
-                            <div key={sub.id} style={{ fontSize: '0.8rem', color: '#94a3b8', margin: '0.2rem 0' }}>
-                              &bull; {sub.title} {sub.status === 'done' ? '✅' : '⏳'}
-                            </div>
-                          ))}
+                          {t.subtasks.map((sub) => {
+                            const subDone = sub.status === 'done';
+                            return (
+                              <div key={sub.id} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', margin: '0.3rem 0' }}>
+                                <button
+                                  onClick={() => (subDone ? onUncomplete(sub.id) : onComplete(sub.id))}
+                                  title={subDone ? 'Reopen subtask' : 'Complete subtask'}
+                                  style={{
+                                    width: '16px',
+                                    height: '16px',
+                                    borderRadius: '4px',
+                                    border: subDone ? 'none' : '2px solid rgba(255, 255, 255, 0.25)',
+                                    background: subDone ? '#06b6d4' : 'transparent',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    cursor: 'pointer',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {subDone && <Check size={10} color="#000000" strokeWidth={3} />}
+                                </button>
+                                <span style={{
+                                  fontSize: '0.8rem',
+                                  color: subDone ? '#64748b' : '#94a3b8',
+                                  textDecoration: subDone ? 'line-through' : 'none',
+                                }}>
+                                  {sub.title}
+                                </span>
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
@@ -251,7 +351,6 @@ export const TaskBoard: React.FC<TaskBoardProps> = ({
         </div>
       </div>
 
-      {/* Add Task Button matching image */}
       <button
         onClick={onAddTask}
         style={{

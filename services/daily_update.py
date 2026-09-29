@@ -56,12 +56,27 @@ def close_day(
 
     Returns the saved DailyUpdate.
     """
-    # Start transaction
+    existing = repo.get_daily_update(conn, date)
+    if existing:
+        # Reflection edits after close-out must not drop or rollover again.
+        repo.upsert_daily_update(
+            conn,
+            date=date,
+            planned_count=existing.planned_count,
+            completed_count=existing.completed_count,
+            completed_summary=form.completed_summary,
+            learned_today=form.learned_today,
+            study_minutes=form.study_minutes,
+            day_rating=form.day_rating,
+            blockers=form.blockers,
+            tomorrow_focus=form.tomorrow_focus,
+        )
+        return repo.get_daily_update(conn, date)
+
     open_tasks = repo.get_todo_tasks_for_date(conn, date)
     planned_count = repo.count_planned_for_date(conn, date)
     completed_count = repo.count_completed_for_date(conn, date)
 
-    # Upsert daily update
     repo.upsert_daily_update(
         conn,
         date=date,
@@ -75,13 +90,11 @@ def close_day(
         tomorrow_focus=form.tomorrow_focus,
     )
 
-    # Drop tasks not being carried
     carry_set = set(carry_task_ids)
     for task in open_tasks:
         if task.id not in carry_set:
             repo.drop_task(conn, task.id)
 
-    # Rollover the carried tasks
     next_day = add_days(date, 1)
     rollover(date, next_day, conn)
 

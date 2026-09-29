@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Moon, CheckCircle2, ArrowRight } from 'lucide-react';
-import { fetchDailyUpdate, closeDailyUpdate } from '../api';
-import { DailyUpdatePrefill } from '../types';
+import { fetchDailyUpdate, closeDailyUpdate, updateDailyUpdate } from '../api';
+import { CloseDayResult, DailyUpdatePrefill } from '../types';
 
 interface DailyUpdateModalProps {
   onClose: () => void;
@@ -22,6 +22,8 @@ export const DailyUpdateModal: React.FC<DailyUpdateModalProps> = ({ onClose, onS
   const [blockers, setBlockers] = useState('');
   const [tomorrowFocus, setTomorrowFocus] = useState('');
   const [carryMap, setCarryMap] = useState<Record<number, boolean>>({});
+  const [result, setResult] = useState<CloseDayResult | null>(null);
+  const [updatedOnly, setUpdatedOnly] = useState(false);
 
   useEffect(() => {
     fetchDailyUpdate()
@@ -54,23 +56,36 @@ export const DailyUpdateModal: React.FC<DailyUpdateModalProps> = ({ onClose, onS
     setSubmitting(true);
     setError(null);
     try {
-      const carryIds = Object.keys(carryMap)
-        .filter((k) => carryMap[Number(k)])
-        .map(Number);
+      if (data.is_closed) {
+        await updateDailyUpdate({
+          date: data.date,
+          completed_summary: summary,
+          learned_today: learned,
+          study_minutes: studyMin,
+          day_rating: rating,
+          blockers,
+          tomorrow_focus: tomorrowFocus,
+        });
+        onSuccess();
+        setUpdatedOnly(true);
+      } else {
+        const carryIds = Object.keys(carryMap)
+          .filter((k) => carryMap[Number(k)])
+          .map(Number);
 
-      await closeDailyUpdate({
-        date: data.date,
-        completed_summary: summary,
-        learned_today: learned,
-        study_minutes: studyMin,
-        day_rating: rating,
-        blockers,
-        tomorrow_focus: tomorrowFocus,
-        carry_task_ids: carryIds,
-      });
-
-      onSuccess();
-      onClose();
+        const closeResult = await closeDailyUpdate({
+          date: data.date,
+          completed_summary: summary,
+          learned_today: learned,
+          study_minutes: studyMin,
+          day_rating: rating,
+          blockers,
+          tomorrow_focus: tomorrowFocus,
+          carry_task_ids: carryIds,
+        });
+        onSuccess();
+        setResult(closeResult);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to close day');
     } finally {
@@ -112,10 +127,12 @@ export const DailyUpdateModal: React.FC<DailyUpdateModalProps> = ({ onClose, onS
             </div>
             <div>
               <h3 style={{ fontSize: '1.4rem', fontWeight: '800', color: '#f8fafc' }}>
-                Evening Daily Reflection
+                {data?.is_closed ? 'Update today’s reflection' : 'Close your day'}
               </h3>
               <div style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
-                Close out {data?.date || 'today'} &bull; Preserve streak &bull; Move tasks forward
+                {data?.is_closed
+                  ? `${data.date} is already closed — edit notes without rolling tasks again`
+                  : `Close out ${data?.date || 'today'} · keep streak · carry or drop leftovers`}
               </div>
             </div>
           </div>
@@ -126,6 +143,69 @@ export const DailyUpdateModal: React.FC<DailyUpdateModalProps> = ({ onClose, onS
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: '3rem', color: '#94a3b8' }}>Preparing daily summary...</div>
+        ) : updatedOnly ? (
+          <div style={{ textAlign: 'center', padding: '1.5rem 0' }}>
+            <CheckCircle2 size={36} color="#34d399" style={{ marginBottom: '0.75rem' }} />
+            <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#f8fafc' }}>Reflection updated</div>
+            <p style={{ color: '#94a3b8', margin: '0.5rem 0 1.25rem' }}>Tasks were already rolled on first close-out.</p>
+            <button
+              onClick={onClose}
+              style={{
+                padding: '0.75rem 1.4rem',
+                borderRadius: '12px',
+                border: 'none',
+                background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+                color: '#fff',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Done
+            </button>
+          </div>
+        ) : result ? (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+              <CheckCircle2 size={22} color="#34d399" />
+              <h4 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#f8fafc' }}>Day closed</h4>
+            </div>
+            <p style={{ color: '#94a3b8', fontSize: '0.88rem', marginBottom: '1rem' }}>
+              Streak is preserved. Tomorrow ({result.tomorrow.date}) is queued.
+            </p>
+            {result.tomorrow.tasks.length > 0 ? (
+              <ul style={{ margin: '0 0 1rem 1.1rem', color: '#e2e8f0', fontSize: '0.9rem' }}>
+                {result.tomorrow.tasks.map((t) => (
+                  <li key={t.id} style={{ marginBottom: '0.3rem' }}>{t.title}</li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ color: '#64748b', fontSize: '0.88rem', marginBottom: '1rem' }}>No tasks carried — tomorrow starts empty.</p>
+            )}
+            {result.tomorrow.suggestions.length > 0 && (
+              <div style={{ marginBottom: '1rem', fontSize: '0.85rem', color: '#fbbf24' }}>
+                Suggested for tomorrow: {result.tomorrow.suggestions.map((s) => s.title).join('; ')}
+              </div>
+            )}
+            <button
+              onClick={onClose}
+              style={{
+                width: '100%',
+                padding: '0.85rem',
+                borderRadius: '14px',
+                border: 'none',
+                background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+                color: '#fff',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.4rem',
+              }}
+            >
+              Finish <ArrowRight size={16} />
+            </button>
+          </div>
         ) : (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
             {error && (
@@ -277,8 +357,20 @@ export const DailyUpdateModal: React.FC<DailyUpdateModalProps> = ({ onClose, onS
               </div>
             </div>
 
-            {/* Open tasks carry over disposition */}
-            {data && data.open_tasks.length > 0 && (
+            {data && data.is_closed && (
+              <div style={{
+                background: 'rgba(16, 185, 129, 0.08)',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
+                borderRadius: '12px',
+                padding: '0.75rem 1rem',
+                fontSize: '0.82rem',
+                color: '#6ee7b7',
+              }}>
+                This day is already closed. Saving updates notes only — leftover tasks will not be dropped again.
+              </div>
+            )}
+
+            {data && !data.is_closed && data.open_tasks.length > 0 && (
               <div style={{
                 background: 'rgba(255, 255, 255, 0.02)',
                 border: '1px solid rgba(255, 255, 255, 0.08)',
@@ -356,7 +448,11 @@ export const DailyUpdateModal: React.FC<DailyUpdateModalProps> = ({ onClose, onS
                   gap: '0.4rem',
                 }}
               >
-                {submitting ? 'Closing Day...' : '🌙 Complete Close-Out & Plan Tomorrow'}
+                {submitting
+                  ? 'Saving...'
+                  : data?.is_closed
+                    ? 'Save reflection'
+                    : 'Close day & plan tomorrow'}
               </button>
             </div>
           </form>

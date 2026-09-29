@@ -85,6 +85,23 @@ def test_edit_closed_day_no_second_rollover(db_conn):
     assert task.rollover_count == 1
 
 
+def test_close_day_twice_does_not_rerun_rollover(db_conn):
+    """A second close_day call only updates the reflection text."""
+    t1 = task_svc.create_task(db_conn, title="Carry", planned_date="2025-01-10")
+    form = DailyUpdateForm(completed_summary="First close", tomorrow_focus="Ship it")
+    du_svc.close_day("2025-01-10", form, carry_task_ids=[t1], conn=db_conn)
+
+    again = DailyUpdateForm(completed_summary="Edited close", tomorrow_focus="Deep work")
+    saved = du_svc.close_day("2025-01-10", again, carry_task_ids=[], conn=db_conn)
+
+    task = repo.get_task(db_conn, t1)
+    assert task.status == "todo"
+    assert task.planned_date == "2025-01-11"
+    assert task.rollover_count == 1
+    assert saved.completed_summary == "Edited close"
+    assert saved.tomorrow_focus == "Deep work"
+
+
 def test_prefill_includes_completed_titles(db_conn):
     """Prefill has completed task titles."""
     t1 = task_svc.create_task(db_conn, title="Done Task A", planned_date="2025-01-10")

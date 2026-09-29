@@ -11,14 +11,16 @@ import { GoalsView } from './components/GoalsView';
 import { LearningView } from './components/LearningView';
 import { InsightsView } from './components/InsightsView';
 import { SettingsView } from './components/SettingsView';
+import { WeeklyReviewView } from './components/WeeklyReviewView';
 import {
   fetchTodayData,
   completeTask,
   uncompleteTask,
   toggleTop3,
   dropTask,
+  createTask,
 } from './api';
-import { TodayDashboardData } from './types';
+import { Suggestion, TodayDashboardData } from './types';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('today');
@@ -32,6 +34,7 @@ export function App() {
   const [isDailyUpdateOpen, setIsDailyUpdateOpen] = useState(false);
   const [isLogSessionOpen, setIsLogSessionOpen] = useState(false);
   const [logDuration, setLogDuration] = useState<number>(30);
+  const [timerResetKey, setTimerResetKey] = useState(0);
 
   const loadData = async () => {
     try {
@@ -87,10 +90,28 @@ export function App() {
     }
   };
 
+  const handleAcceptSuggestion = async (suggestion: Suggestion) => {
+    try {
+      await createTask({
+        title: suggestion.title,
+        priority: 'high',
+        category: 'learning',
+        estimated_min: suggestion.minutes,
+        goal_id: suggestion.goal_id,
+      });
+      loadData();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
   const openAddSubtask = (parentId: number) => {
     setSubtaskParentId(parentId);
     setIsTaskModalOpen(true);
   };
+
+  const hour = new Date().getHours();
+  const showClosePrompt = Boolean(dashboardData && !dashboardData.day_closed && hour >= 17);
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', width: '100vw' }}>
@@ -128,6 +149,55 @@ export function App() {
         ) : (
           <>
             {activeTab === 'today' && dashboardData && (
+              <div>
+                {dashboardData.day_closed && (
+                  <div style={{
+                    maxWidth: '1440px',
+                    margin: '0 auto 1rem',
+                    padding: '0.75rem 1rem',
+                    borderRadius: '14px',
+                    border: '1px solid rgba(16, 185, 129, 0.3)',
+                    background: 'rgba(16, 185, 129, 0.08)',
+                    color: '#6ee7b7',
+                    fontSize: '0.88rem',
+                    fontWeight: 600,
+                  }}>
+                    Today is closed. Open Daily Update to edit the reflection — leftover tasks already moved or dropped.
+                  </div>
+                )}
+                {showClosePrompt && (
+                  <div style={{
+                    maxWidth: '1440px',
+                    margin: '0 auto 1rem',
+                    padding: '0.75rem 1rem',
+                    borderRadius: '14px',
+                    border: '1px solid rgba(99, 102, 241, 0.35)',
+                    background: 'rgba(99, 102, 241, 0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '1rem',
+                    flexWrap: 'wrap',
+                  }}>
+                    <span style={{ color: '#c7d2fe', fontSize: '0.9rem', fontWeight: 600 }}>
+                      Wrap the day to keep your streak and decide what carries to tomorrow.
+                    </span>
+                    <button
+                      onClick={() => setIsDailyUpdateOpen(true)}
+                      style={{
+                        border: 'none',
+                        borderRadius: '10px',
+                        padding: '0.45rem 0.9rem',
+                        background: 'linear-gradient(135deg, #6366f1 0%, #a855f7 100%)',
+                        color: '#fff',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Close day
+                    </button>
+                  </div>
+                )}
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: '1.4fr 1fr 1fr',
@@ -140,6 +210,8 @@ export function App() {
                   tasks={dashboardData.tasks}
                   top3={dashboardData.top3}
                   completed={dashboardData.completed}
+                  overdue={dashboardData.overdue}
+                  suggestions={dashboardData.suggestions}
                   onComplete={handleCompleteTask}
                   onUncomplete={handleUncompleteTask}
                   onToggleTop3={handleToggleTop3}
@@ -149,6 +221,7 @@ export function App() {
                     setIsTaskModalOpen(true);
                   }}
                   onAddSubtask={openAddSubtask}
+                  onAcceptSuggestion={handleAcceptSuggestion}
                 />
 
                 {/* 2. Bento Hero Card (Center Top) */}
@@ -163,6 +236,7 @@ export function App() {
                 {/* 3. Active Learning Bento (Right) */}
                 <ActiveLearningBento
                   recentSessions={dashboardData.recent_sessions}
+                  resetKey={timerResetKey}
                   onOpenLogModal={(mins) => {
                     setLogDuration(mins || 30);
                     setIsLogSessionOpen(true);
@@ -178,10 +252,12 @@ export function App() {
                   skillSeries={dashboardData.skill_series}
                 />
               </div>
+              </div>
             )}
 
             {activeTab === 'goals' && <GoalsView />}
             {activeTab === 'learning' && <LearningView onOpenLogModal={() => setIsLogSessionOpen(true)} />}
+            {activeTab === 'weekly' && <WeeklyReviewView />}
             {activeTab === 'insights' && <InsightsView />}
             {activeTab === 'settings' && <SettingsView />}
           </>
@@ -211,7 +287,10 @@ export function App() {
         <LogSessionModal
           initialDurationMin={logDuration}
           onClose={() => setIsLogSessionOpen(false)}
-          onSuccess={loadData}
+          onSuccess={() => {
+            setTimerResetKey((k) => k + 1);
+            loadData();
+          }}
         />
       )}
     </div>
