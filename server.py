@@ -206,6 +206,7 @@ def get_today_dashboard():
         top3_tasks = repo.get_top3_tasks(conn, today_iso)
         study_min = repo.study_minutes_for_date(conn, today_iso)
         suggestions = suggest_svc.suggest_tasks_for(today_iso, conn)
+        day_closed = repo.get_daily_update(conn, today_iso) is not None
 
         # Active goals with progress
         goals = repo.get_active_goals(conn)
@@ -243,6 +244,7 @@ def get_today_dashboard():
 
     return {
         "today": today_iso,
+        "day_closed": day_closed,
         "streak": streak,
         "done_count": done_count,
         "planned_count": len(todo_tasks) + done_count,

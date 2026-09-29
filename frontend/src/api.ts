@@ -4,10 +4,11 @@ import {
   DailyUpdatePrefill,
   LearningItem,
   SettingsData,
-  BackupInfo,
   RecurringTask,
   RecurringTaskForm,
   NotificationSettings,
+  CloseDayResult,
+  ReviewsPayload,
 } from './types';
 
 const BASE = '/api';
@@ -93,13 +94,31 @@ export async function closeDailyUpdate(data: {
   blockers: string;
   tomorrow_focus: string;
   carry_task_ids: number[];
-}): Promise<any> {
+}): Promise<CloseDayResult> {
   const res = await fetch(`${BASE}/daily-update/close`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error('Failed to close day');
+  return res.json();
+}
+
+export async function updateDailyUpdate(data: {
+  date: string;
+  completed_summary: string;
+  learned_today: string;
+  study_minutes: number;
+  day_rating: number;
+  blockers: string;
+  tomorrow_focus: string;
+}): Promise<any> {
+  const res = await fetch(`${BASE}/daily-update`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to update daily reflection');
   return res.json();
 }
 
@@ -173,6 +192,28 @@ export async function updateGoalStatus(goalId: number, status: string): Promise<
     body: JSON.stringify({ status }),
   });
   if (!res.ok) throw new Error('Failed to update goal');
+  return res.json();
+}
+
+export async function fetchReviews(week?: string): Promise<ReviewsPayload> {
+  const url = week ? `${BASE}/reviews?week=${week}` : `${BASE}/reviews`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to load weekly review');
+  return res.json();
+}
+
+export async function saveReview(data: {
+  week_start: string;
+  wins: string;
+  blockers: string;
+  next_focus: string;
+}): Promise<any> {
+  const res = await fetch(`${BASE}/reviews`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error('Failed to save weekly review');
   return res.json();
 }
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Calendar, FileText, BookOpen, Target, BarChart3, Settings, Zap } from 'lucide-react';
+import { Calendar, FileText, BookOpen, Target, BarChart3, Settings, Zap, CalendarRange } from 'lucide-react';
 
 interface SidebarProps {
   activeTab: string;
@@ -13,6 +13,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab, onOpen
     { id: 'daily-update', label: 'Daily Update', icon: FileText, action: onOpenDailyUpdate },
     { id: 'learning', label: 'Learning', icon: BookOpen },
     { id: 'goals', label: 'Goals', icon: Target },
+    { id: 'weekly', label: 'Weekly Review', icon: CalendarRange },
     { id: 'insights', label: 'Insights', icon: BarChart3 },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];

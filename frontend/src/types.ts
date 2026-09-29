@@ -62,8 +62,44 @@ export interface Suggestion {
   reason: string;
 }
 
+export interface CloseDayResult {
+  success: boolean;
+  saved: any;
+  tomorrow: {
+    date: string;
+    tasks: Task[];
+    suggestions: Suggestion[];
+  };
+}
+
+export interface WeekSummary {
+  tasks_completed: number;
+  completion_rate: number;
+  study_hours: number;
+  avg_rating?: number | null;
+  best_day?: { date: string; rating: number; completed: number } | null;
+  top_skill?: string | null;
+  blockers: string[];
+  takeaways: string[];
+}
+
+export interface WeeklyReview {
+  week_start: string;
+  wins?: string | null;
+  blockers?: string | null;
+  next_focus?: string | null;
+}
+
+export interface ReviewsPayload {
+  selected_week: string;
+  summary: WeekSummary;
+  review: WeeklyReview | null;
+  past_reviews: WeeklyReview[];
+}
+
 export interface TodayDashboardData {
   today: string;
+  day_closed?: boolean;
   streak: number;
   done_count: number;
   planned_count: number;
