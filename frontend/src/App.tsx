@@ -22,9 +22,19 @@ import {
   dropTask,
   createTask,
 } from './api';
-import { Suggestion, TodayDashboardData } from './types';
+import { Suggestion, TodayDashboardData, User } from './types';
+import { AuthView } from './components/AuthView';
+import {
+  getStoredUser,
+  getStoredToken,
+  fetchCurrentUser,
+  clearAuthSession,
+  logout,
+} from './api';
 
 function AppContent() {
+  const [user, setUser] = useState<User | null>(() => getStoredUser());
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<string>('today');
   const [dashboardData, setDashboardData] = useState<TodayDashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
@@ -41,6 +51,33 @@ function AppContent() {
   const [logDuration, setLogDuration] = useState<number>(30);
   const [timerResetKey, setTimerResetKey] = useState(0);
 
+  // Auth Initialization & token validation
+  useEffect(() => {
+    const initAuth = async () => {
+      const token = getStoredToken();
+      if (token) {
+        try {
+          const profile = await fetchCurrentUser();
+          setUser(profile);
+        } catch {
+          clearAuthSession();
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+      setAuthChecking(false);
+    };
+
+    initAuth();
+
+    const handleAuthChange = () => {
+      setUser(getStoredUser());
+    };
+    window.addEventListener('flux:auth_changed', handleAuthChange);
+    return () => window.removeEventListener('flux:auth_changed', handleAuthChange);
+  }, []);
+
   // Enforce tab restriction: only 'learning' and 'goals' tabs work during focus mode!
   useEffect(() => {
     if (isFocusMode && !isTabAllowed(activeTab)) {
@@ -49,6 +86,7 @@ function AppContent() {
   }, [isFocusMode, activeTab, isTabAllowed]);
 
   const loadData = async () => {
+    if (!user) return;
     try {
       const data = await fetchTodayData();
       setDashboardData(data);
@@ -61,10 +99,18 @@ function AppContent() {
   };
 
   useEffect(() => {
-    loadData();
-    const interval = setInterval(loadData, 30000); // Poll updates every 30s
-    return () => clearInterval(interval);
-  }, []);
+    if (user) {
+      loadData();
+      const interval = setInterval(loadData, 30000); // Poll updates every 30s
+      return () => clearInterval(interval);
+    }
+  }, [user]);
+
+  const handleLogout = () => {
+    logout();
+    setUser(null);
+    setDashboardData(null);
+  };
 
   const handleCompleteTask = async (id: number) => {
     try {
@@ -139,6 +185,44 @@ function AppContent() {
   const hour = new Date().getHours();
   const showClosePrompt = Boolean(dashboardData && !dashboardData.day_closed && hour >= 17);
 
+  // If still checking token validity on initial mount
+  if (authChecking) {
+    return (
+      <div
+        style={{
+          minHeight: '100vh',
+          width: '100vw',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'rgba(10, 14, 26, 1)',
+          color: '#cbd5e1',
+          gap: '1rem',
+        }}
+      >
+        <div
+          style={{
+            width: '40px',
+            height: '40px',
+            border: '3px solid rgba(6, 182, 212, 0.2)',
+            borderTopColor: '#06b6d4',
+            borderRadius: '50%',
+            animation: 'spin 0.8s linear infinite',
+          }}
+        />
+        <span style={{ fontSize: '0.9rem', color: '#94a3b8', letterSpacing: '0.04em' }}>
+          Loading workspace...
+        </span>
+      </div>
+    );
+  }
+
+  // If user is not authenticated, show AuthView
+  if (!user) {
+    return <AuthView onAuthSuccess={(newUser) => setUser(newUser)} />;
+  }
+
   return (
     <div style={{ display: 'flex', minHeight: '100vh', width: '100vw' }}>
       {/* Floating Left Glass Sidebar */}
@@ -146,6 +230,8 @@ function AppContent() {
         activeTab={activeTab}
         onSelectTab={handleTabSelection}
         onOpenDailyUpdate={handleOpenDailyUpdate}
+        user={user}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Workspace */}

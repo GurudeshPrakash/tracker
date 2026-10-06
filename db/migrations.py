@@ -119,12 +119,78 @@ CREATE TABLE review (
 );
 """
 
+SCHEMA_V2_SQL = """
+-- 1. Create user table
+CREATE TABLE IF NOT EXISTS user (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    name          TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+);
+
+-- 2. Add user_id column to existing entity tables
+ALTER TABLE goal ADD COLUMN user_id INTEGER REFERENCES user(id) ON DELETE CASCADE;
+ALTER TABLE learning_item ADD COLUMN user_id INTEGER REFERENCES user(id) ON DELETE CASCADE;
+ALTER TABLE recurring_task ADD COLUMN user_id INTEGER REFERENCES user(id) ON DELETE CASCADE;
+ALTER TABLE task ADD COLUMN user_id INTEGER REFERENCES user(id) ON DELETE CASCADE;
+ALTER TABLE learning_session ADD COLUMN user_id INTEGER REFERENCES user(id) ON DELETE CASCADE;
+
+-- 3. Rebuild daily_update to have composite UNIQUE(user_id, date)
+CREATE TABLE daily_update_v2 (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id           INTEGER REFERENCES user(id) ON DELETE CASCADE,
+    date              TEXT NOT NULL,
+    planned_count     INTEGER NOT NULL DEFAULT 0,
+    completed_count   INTEGER NOT NULL DEFAULT 0,
+    completed_summary TEXT,
+    learned_today     TEXT,
+    study_minutes     INTEGER NOT NULL DEFAULT 0,
+    day_rating        INTEGER CHECK (day_rating BETWEEN 1 AND 5),
+    blockers          TEXT,
+    tomorrow_focus    TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    updated_at        TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(user_id, date)
+);
+INSERT INTO daily_update_v2 (id, user_id, date, planned_count, completed_count, completed_summary, learned_today, study_minutes, day_rating, blockers, tomorrow_focus, created_at, updated_at)
+SELECT id, 1, date, planned_count, completed_count, completed_summary, learned_today, study_minutes, day_rating, blockers, tomorrow_focus, created_at, updated_at FROM daily_update;
+DROP TABLE daily_update;
+ALTER TABLE daily_update_v2 RENAME TO daily_update;
+
+-- 4. Rebuild review to have composite UNIQUE(user_id, week_start)
+CREATE TABLE review_v2 (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER REFERENCES user(id) ON DELETE CASCADE,
+    week_start  TEXT NOT NULL,
+    wins        TEXT,
+    blockers    TEXT,
+    next_focus  TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now','localtime')),
+    UNIQUE(user_id, week_start)
+);
+INSERT INTO review_v2 (id, user_id, week_start, wins, blockers, next_focus, created_at)
+SELECT id, 1, week_start, wins, blockers, next_focus, created_at FROM review;
+DROP TABLE review;
+ALTER TABLE review_v2 RENAME TO review;
+
+-- 5. Indexes for fast user queries
+CREATE INDEX IF NOT EXISTS idx_task_user ON task(user_id);
+CREATE INDEX IF NOT EXISTS idx_task_user_planned ON task(user_id, planned_date, status);
+CREATE INDEX IF NOT EXISTS idx_goal_user ON goal(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_learning_item_user ON learning_item(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_learning_session_user ON learning_session(user_id, session_date);
+CREATE INDEX IF NOT EXISTS idx_recurring_user ON recurring_task(user_id, active);
+CREATE INDEX IF NOT EXISTS idx_daily_update_user ON daily_update(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_review_user ON review(user_id, week_start);
+"""
+
 # ---------------------------------------------------------------------------
 # Migration registry — add new versions here
 # ---------------------------------------------------------------------------
 MIGRATIONS: dict[int, str] = {
     1: SCHEMA_V1_SQL,
-    # 2: "ALTER TABLE task ADD COLUMN ...;",
+    2: SCHEMA_V2_SQL,
 }
 
 

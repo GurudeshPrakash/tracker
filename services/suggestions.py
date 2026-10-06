@@ -9,79 +9,62 @@ import math
 import sqlite3
 
 from db import repository as repo
-from db.models import Suggestion
+from db.models import Suggestion, Goal
 from services.goals import goal_progress
 from lib.dates import week_end, days_between
 
 
-def suggest_tasks_for(date: str, conn: sqlite3.Connection) -> list[Suggestion]:
-    """Generate task suggestions for a given date based on active goals.
+def _calculate_goal_minutes(goal: Goal, progress: dict, date: str) -> int:
+    """Calculate raw daily minutes needed for a goal based on target type."""
+    if goal.target_type == "weekly_hours":
+        remaining_h = max(0, goal.target_hours - progress["week_hours"])
+        we = week_end(date)
+        days_left = max(1, days_between(date, we) + 1)
+        return math.ceil(remaining_h * 60 / days_left)
 
-    Rules (Section 7.7):
-    - For each active goal, compute remaining hours and daily minutes needed.
-    - Only suggest if the goal is 'behind' OR minutes > 0 and no task for
-      that goal is already planned for the date.
-    - Cap minutes at 180, round up to nearest 5.
-    - Title: "Study {skill or goal title} ({minutes} min)"
-    - Reason: "Behind on '{goal}': {done}h of {target}h"
+    remaining_h = max(0, goal.target_hours - progress["done_hours"])
+    days_left = max(1, days_between(date, goal.target_date) + 1) if goal.target_date else 1
+    return math.ceil(remaining_h * 60 / days_left)
 
-    Returns:
-        List of Suggestion dataclasses.
-    """
-    active_goals = repo.get_active_goals(conn)
+
+def _build_suggestion(goal: Goal, progress: dict, minutes: int) -> Suggestion:
+    """Create a formatted suggestion dataclass with rounded minutes."""
+    effective_min = 30 if minutes <= 0 else min(minutes, 180)
+    effective_min = math.ceil(effective_min / 5) * 5
+    title = f"Study {goal.title} ({effective_min} min)"
+    reason = (
+        f"Behind on '{goal.title}': "
+        f"{progress['done_hours']:.1f}h of {goal.target_hours}h"
+    )
+    return Suggestion(
+        goal_id=goal.id,
+        title=title,
+        minutes=effective_min,
+        reason=reason,
+    )
+
+
+def suggest_tasks_for(date: str, conn: sqlite3.Connection, user_id: int | None = None) -> list[Suggestion]:
+    """Generate task suggestions for a given date based on active goals."""
+    active_goals = repo.get_active_goals(conn, user_id=user_id)
     suggestions = []
 
     for goal in active_goals:
-        progress = goal_progress(goal.id, date, conn)
-
-        # Skip completed or paused/dropped goals
-        if progress["status"] == "complete":
-            continue
         if goal.status != "active":
             continue
 
-        # Check if a task for this goal is already planned for the date
-        existing_tasks = repo.get_tasks_for_goal_on_date(conn, goal.id, date)
-        if existing_tasks:
+        progress = goal_progress(goal.id, date, conn)
+        if progress["status"] == "complete":
             continue
 
-        # Calculate minutes needed
-        if goal.target_type == "weekly_hours":
-            remaining_h = max(0, goal.target_hours - progress["week_hours"])
-            # Days left from date to Sunday inclusive
-            we = week_end(date)
-            days_left = max(1, days_between(date, we) + 1)
-            minutes = math.ceil(remaining_h * 60 / days_left)
-        else:  # total_hours
-            remaining_h = max(0, goal.target_hours - progress["done_hours"])
-            if goal.target_date:
-                days_left = max(1, days_between(date, goal.target_date) + 1)
-            else:
-                days_left = 1
-            minutes = math.ceil(remaining_h * 60 / days_left)
+        # Check if a task for this goal is already planned for the date
+        if repo.get_tasks_for_goal_on_date(conn, goal.id, date, user_id=user_id):
+            continue
 
-        # Only suggest if behind or there's work to do
+        minutes = _calculate_goal_minutes(goal, progress, date)
         if progress["status"] != "behind" and minutes <= 0:
             continue
 
-        if minutes <= 0:
-            minutes = 30  # Minimum suggestion
-
-        # Cap at 180 and round up to nearest 5
-        minutes = min(minutes, 180)
-        minutes = math.ceil(minutes / 5) * 5
-
-        title = f"Study {goal.title} ({minutes} min)"
-        reason = (
-            f"Behind on '{goal.title}': "
-            f"{progress['done_hours']:.1f}h of {goal.target_hours}h"
-        )
-
-        suggestions.append(Suggestion(
-            goal_id=goal.id,
-            title=title,
-            minutes=minutes,
-            reason=reason,
-        ))
+        suggestions.append(_build_suggestion(goal, progress, minutes))
 
     return suggestions

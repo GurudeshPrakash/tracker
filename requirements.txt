@@ -7,4 +7,5 @@ pandas>=2.2
 plotly>=5.24
 plyer>=2.1
 pytest>=8.0
-
+pyjwt>=2.8.0
+bcrypt>=4.0.0

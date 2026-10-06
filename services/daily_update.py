@@ -14,21 +14,13 @@ from lib.dates import add_days
 from services.rollover import rollover
 
 
-def build_prefill(date: str, conn: sqlite3.Connection) -> dict:
-    """Build pre-fill data for the daily update form.
-
-    Returns:
-        completed_tasks: list[Task] — tasks completed on this date
-        open_tasks: list[Task] — todo tasks planned for this date
-        study_minutes: int — sum of session durations on this date
-        session_takeaways: list[str] — takeaways logged on this date
-        existing: DailyUpdate | None — existing update if day was already closed
-    """
-    completed_tasks = repo.get_done_tasks_for_date(conn, date)
-    open_tasks = repo.get_todo_tasks_for_date(conn, date)
-    study_minutes = repo.study_minutes_for_date(conn, date)
-    session_takeaways = repo.takeaways_for_date(conn, date)
-    existing = repo.get_daily_update(conn, date)
+def build_prefill(date: str, conn: sqlite3.Connection, user_id: Optional[int] = None) -> dict:
+    """Build pre-fill data for the daily update form."""
+    completed_tasks = repo.get_done_tasks_for_date(conn, date, user_id=user_id)
+    open_tasks = repo.get_todo_tasks_for_date(conn, date, user_id=user_id)
+    study_minutes = repo.study_minutes_for_date(conn, date, user_id=user_id)
+    session_takeaways = repo.takeaways_for_date(conn, date, user_id=user_id)
+    existing = repo.get_daily_update(conn, date, user_id=user_id)
 
     return {
         "completed_tasks": completed_tasks,
@@ -44,19 +36,10 @@ def close_day(
     form: DailyUpdateForm,
     carry_task_ids: list[int],
     conn: sqlite3.Connection,
+    user_id: Optional[int] = None,
 ) -> DailyUpdate:
-    """Close the day in a single transaction.
-
-    Steps (Section 7.4):
-    1. planned_count = tasks that were planned for date (todo + done with completed_date == date)
-    2. completed_count = tasks with completed_date == date
-    3. Upsert daily_update for date (form values + snapshot counts)
-    4. For open tasks NOT in carry_task_ids: set status='dropped'
-    5. rollover(date, next_day) for the carried tasks
-
-    Returns the saved DailyUpdate.
-    """
-    existing = repo.get_daily_update(conn, date)
+    """Close the day in a single transaction."""
+    existing = repo.get_daily_update(conn, date, user_id=user_id)
     if existing:
         # Reflection edits after close-out must not drop or rollover again.
         repo.upsert_daily_update(
@@ -70,12 +53,13 @@ def close_day(
             day_rating=form.day_rating,
             blockers=form.blockers,
             tomorrow_focus=form.tomorrow_focus,
+            user_id=user_id,
         )
-        return repo.get_daily_update(conn, date)
+        return repo.get_daily_update(conn, date, user_id=user_id)
 
-    open_tasks = repo.get_todo_tasks_for_date(conn, date)
-    planned_count = repo.count_planned_for_date(conn, date)
-    completed_count = repo.count_completed_for_date(conn, date)
+    open_tasks = repo.get_todo_tasks_for_date(conn, date, user_id=user_id)
+    planned_count = repo.count_planned_for_date(conn, date, user_id=user_id)
+    completed_count = repo.count_completed_for_date(conn, date, user_id=user_id)
 
     repo.upsert_daily_update(
         conn,
@@ -88,14 +72,15 @@ def close_day(
         day_rating=form.day_rating,
         blockers=form.blockers,
         tomorrow_focus=form.tomorrow_focus,
+        user_id=user_id,
     )
 
     carry_set = set(carry_task_ids)
     for task in open_tasks:
         if task.id not in carry_set:
-            repo.drop_task(conn, task.id)
+            repo.drop_task(conn, task.id, user_id=user_id)
 
     next_day = add_days(date, 1)
-    rollover(date, next_day, conn)
+    rollover(date, next_day, conn, user_id=user_id)
 
-    return repo.get_daily_update(conn, date)
+    return repo.get_daily_update(conn, date, user_id=user_id)

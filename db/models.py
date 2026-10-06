@@ -26,6 +26,16 @@ RECURRING_RULES = ("daily", "weekdays", "weekly", "monthly")
 # Dataclasses
 # ---------------------------------------------------------------------------
 @dataclass
+class User:
+    """User account model."""
+    id: int
+    email: str
+    password_hash: str
+    name: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+@dataclass
 class Task:
     """A single task."""
     id: int
@@ -47,6 +57,7 @@ class Task:
     completed_at: Optional[str] = None
     completed_date: Optional[str] = None
     created_at: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 @dataclass
@@ -64,6 +75,7 @@ class DailyUpdate:
     tomorrow_focus: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 @dataclass
@@ -87,6 +99,7 @@ class LearningItem:
     status: str = "in_progress"
     goal_id: Optional[int] = None
     created_at: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 @dataclass
@@ -100,6 +113,7 @@ class LearningSession:
     takeaway: str = ""
     confidence: Optional[int] = None
     created_at: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 @dataclass
@@ -113,6 +127,7 @@ class Goal:
     target_date: Optional[str] = None
     status: str = "active"
     created_at: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 @dataclass
@@ -132,6 +147,7 @@ class RecurringTask:
     end_date: Optional[str] = None
     active: int = 1
     last_generated: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 @dataclass
@@ -143,6 +159,7 @@ class Review:
     blockers: Optional[str] = None
     next_focus: Optional[str] = None
     created_at: Optional[str] = None
+    user_id: Optional[int] = None
 
 
 @dataclass
