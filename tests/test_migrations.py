@@ -4,10 +4,10 @@ import sqlite3
 from db.migrations import run_migrations, _get_current_version
 
 
-def test_fresh_db_ends_at_version_1(db_conn):
-    """A fresh database after migrations should be at version 1."""
+def test_fresh_db_ends_at_latest_version(db_conn):
+    """A fresh database after migrations should be at version 2."""
     version = _get_current_version(db_conn)
-    assert version == 1
+    assert version == 2
 
 
 def test_running_migrations_twice_is_safe(db_path):
@@ -16,23 +16,23 @@ def test_running_migrations_twice_is_safe(db_path):
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     run_migrations(conn)
-    assert _get_current_version(conn) == 1
+    assert _get_current_version(conn) == 2
 
     # Run again — should be a no-op
     run_migrations(conn)
-    assert _get_current_version(conn) == 1
+    assert _get_current_version(conn) == 2
     conn.close()
 
 
 def test_all_tables_created(db_conn):
-    """All expected tables exist after migration v1."""
+    """All expected tables exist after migrations."""
     tables = db_conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
     table_names = sorted([r[0] for r in tables])
     expected = sorted([
         "schema_version", "goal", "learning_item", "recurring_task",
-        "task", "learning_session", "daily_update", "review",
+        "task", "learning_session", "daily_update", "review", "user",
     ])
     assert table_names == expected
 

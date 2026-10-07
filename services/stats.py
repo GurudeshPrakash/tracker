@@ -12,14 +12,17 @@ import pandas as pd
 from db import repository as repo
 from lib.dates import today, add_days, week_start, week_end, date_range, days_between
 
+SESSION_DATE_RANGE_CLAUSE = "session_date BETWEEN ? AND ?"
+USER_ID_CLAUSE = "user_id = ?"
 
-def update_streak(today_date: str, conn: sqlite3.Connection) -> int:
+
+def update_streak(today_date: str, conn: sqlite3.Connection, user_id: int | None = None) -> int:
     """Count consecutive calendar days ending today (or yesterday if today
     has no update yet) that each have a daily_update row.
 
     Returns the streak length (0 if no updates at all).
     """
-    all_dates = repo.get_all_update_dates(conn)
+    all_dates = repo.get_all_update_dates(conn, user_id=user_id)
     if not all_dates:
         return 0
 
@@ -41,12 +44,12 @@ def update_streak(today_date: str, conn: sqlite3.Connection) -> int:
     return streak
 
 
-def completion_rate_series(start: str, end: str, conn: sqlite3.Connection) -> pd.DataFrame:
+def completion_rate_series(start: str, end: str, conn: sqlite3.Connection, user_id: int | None = None) -> pd.DataFrame:
     """Return a DataFrame with columns: date, planned, completed, rate.
 
     Uses daily_update snapshot counts for accuracy.
     """
-    updates = repo.get_daily_updates_in_range(conn, start, end)
+    updates = repo.get_daily_updates_in_range(conn, start, end, user_id=user_id)
     if not updates:
         return pd.DataFrame(columns=["date", "planned", "completed", "rate"])
 
@@ -62,9 +65,9 @@ def completion_rate_series(start: str, end: str, conn: sqlite3.Connection) -> pd
     return pd.DataFrame(data)
 
 
-def minutes_by_category(start: str, end: str, conn: sqlite3.Connection) -> pd.DataFrame:
+def minutes_by_category(start: str, end: str, conn: sqlite3.Connection, user_id: int | None = None) -> pd.DataFrame:
     """Return DataFrame with columns: category, minutes (sum of actual_min of done tasks)."""
-    tasks = repo.get_done_tasks_in_range(conn, start, end)
+    tasks = repo.get_done_tasks_in_range(conn, start, end, user_id=user_id)
     if not tasks:
         return pd.DataFrame(columns=["category", "minutes"])
 
@@ -79,75 +82,84 @@ def minutes_by_category(start: str, end: str, conn: sqlite3.Connection) -> pd.Da
     ])
 
 
-def study_minutes_by_skill(start: str, end: str, conn: sqlite3.Connection) -> pd.DataFrame:
+def study_minutes_by_skill(start: str, end: str, conn: sqlite3.Connection, user_id: int | None = None) -> pd.DataFrame:
     """Return DataFrame with columns: skill, minutes."""
-    rows = conn.execute(
-        """SELECT li.skill, COALESCE(SUM(ls.duration_min), 0) as minutes
-           FROM learning_session ls
-           JOIN learning_item li ON ls.learning_item_id = li.id
-           WHERE ls.session_date BETWEEN ? AND ?
-           GROUP BY li.skill
-           ORDER BY minutes DESC""",
-        (start, end),
-    ).fetchall()
+    clauses = ["ls.session_date BETWEEN ? AND ?"]
+    params: list[object] = [start, end]
+    if user_id is not None:
+        clauses.append("ls.user_id = ?")
+        params.append(user_id)
+
+    sql = f"""SELECT li.skill, COALESCE(SUM(ls.duration_min), 0) as minutes
+              FROM learning_session ls
+              JOIN learning_item li ON ls.learning_item_id = li.id
+              WHERE {' AND '.join(clauses)}
+              GROUP BY li.skill
+              ORDER BY minutes DESC"""
+    rows = conn.execute(sql, params).fetchall()
     if not rows:
         return pd.DataFrame(columns=["skill", "minutes"])
     return pd.DataFrame([dict(r) for r in rows])
 
 
-def study_minutes_per_week(weeks: int, today_date: str, conn: sqlite3.Connection) -> pd.DataFrame:
+def study_minutes_per_week(weeks: int, today_date: str, conn: sqlite3.Connection, user_id: int | None = None) -> pd.DataFrame:
     """Return DataFrame with columns: week_start, minutes for the last N weeks."""
     data = []
     ws = week_start(today_date)
     for i in range(weeks):
         current_ws = add_days(ws, -7 * i)
         current_we = week_end(current_ws)
-        rows = conn.execute(
-            "SELECT COALESCE(SUM(duration_min), 0) FROM learning_session WHERE session_date BETWEEN ? AND ?",
-            (current_ws, current_we),
-        ).fetchone()
+        clauses = [SESSION_DATE_RANGE_CLAUSE]
+        params: list[object] = [current_ws, current_we]
+        if user_id is not None:
+            clauses.append(USER_ID_CLAUSE)
+            params.append(user_id)
+        sql = f"SELECT COALESCE(SUM(duration_min), 0) FROM learning_session WHERE {' AND '.join(clauses)}"
+        rows = conn.execute(sql, params).fetchone()
         data.append({"week_start": current_ws, "minutes": rows[0]})
 
     data.reverse()
     return pd.DataFrame(data)
 
 
-def average_rating(start: str, end: str, conn: sqlite3.Connection) -> float | None:
+def average_rating(start: str, end: str, conn: sqlite3.Connection, user_id: int | None = None) -> float | None:
     """Return average day_rating from daily_updates in range, or None."""
-    row = conn.execute(
-        "SELECT AVG(day_rating) FROM daily_update WHERE date BETWEEN ? AND ? AND day_rating IS NOT NULL",
-        (start, end),
-    ).fetchone()
+    clauses = ["date BETWEEN ? AND ?", "day_rating IS NOT NULL"]
+    params: list[object] = [start, end]
+    if user_id is not None:
+        clauses.append(USER_ID_CLAUSE)
+        params.append(user_id)
+    sql = f"SELECT AVG(day_rating) FROM daily_update WHERE {' AND '.join(clauses)}"
+    row = conn.execute(sql, params).fetchone()
     val = row[0]
     return round(val, 1) if val is not None else None
 
 
-def week_summary(week_start_date: str, conn: sqlite3.Connection) -> dict:
-    """Return a summary dict for a given week.
-
-    Returns: tasks_completed, completion_rate, study_hours, avg_rating,
-    best_day, top_skill, blockers, takeaways.
-    """
+def week_summary(week_start_date: str, conn: sqlite3.Connection, user_id: int | None = None) -> dict:
+    """Return a summary dict for a given week."""
     we = week_end(week_start_date)
 
     # Tasks completed
-    tasks_completed = repo.count_done_tasks_in_range(conn, week_start_date, we)
+    tasks_completed = repo.count_done_tasks_in_range(conn, week_start_date, we, user_id=user_id)
 
     # Completion rate from daily updates
-    updates = repo.get_daily_updates_in_range(conn, week_start_date, we)
+    updates = repo.get_daily_updates_in_range(conn, week_start_date, we, user_id=user_id)
     total_planned = sum(u.planned_count for u in updates)
     total_completed = sum(u.completed_count for u in updates)
     completion_rate = (total_completed / total_planned * 100) if total_planned > 0 else 0
 
     # Study hours
-    study_row = conn.execute(
-        "SELECT COALESCE(SUM(duration_min), 0) FROM learning_session WHERE session_date BETWEEN ? AND ?",
-        (week_start_date, we),
-    ).fetchone()
+    clauses = [SESSION_DATE_RANGE_CLAUSE]
+    params: list[object] = [week_start_date, we]
+    if user_id is not None:
+        clauses.append(USER_ID_CLAUSE)
+        params.append(user_id)
+    study_sql = f"SELECT COALESCE(SUM(duration_min), 0) FROM learning_session WHERE {' AND '.join(clauses)}"
+    study_row = conn.execute(study_sql, params).fetchone()
     study_hours = round(study_row[0] / 60, 1)
 
     # Average rating
-    avg_rat = average_rating(week_start_date, we, conn)
+    avg_rat = average_rating(week_start_date, we, conn, user_id=user_id)
 
     # Best day (highest rating, ties broken by most tasks completed)
     best_day = None
@@ -158,17 +170,20 @@ def week_summary(week_start_date: str, conn: sqlite3.Connection) -> dict:
             best_day = {"date": best.date, "rating": best.day_rating, "completed": best.completed_count}
 
     # Top skill by minutes
-    skill_df = study_minutes_by_skill(week_start_date, we, conn)
+    skill_df = study_minutes_by_skill(week_start_date, we, conn, user_id=user_id)
     top_skill = skill_df.iloc[0]["skill"] if not skill_df.empty else None
 
     # Blockers from daily updates
     blockers = [u.blockers for u in updates if u.blockers]
 
     # Takeaways from sessions
-    takeaway_rows = conn.execute(
-        "SELECT takeaway FROM learning_session WHERE session_date BETWEEN ? AND ? ORDER BY session_date",
-        (week_start_date, we),
-    ).fetchall()
+    takeaway_clauses = [SESSION_DATE_RANGE_CLAUSE]
+    takeaway_params: list[object] = [week_start_date, we]
+    if user_id is not None:
+        takeaway_clauses.append(USER_ID_CLAUSE)
+        takeaway_params.append(user_id)
+    takeaway_sql = f"SELECT takeaway FROM learning_session WHERE {' AND '.join(takeaway_clauses)} ORDER BY session_date"
+    takeaway_rows = conn.execute(takeaway_sql, takeaway_params).fetchall()
     takeaways = [r[0] for r in takeaway_rows]
 
     return {

@@ -11,7 +11,7 @@ import sqlite3
 from db import repository as repo
 
 
-def rollover(from_date: str, to_date: str, conn: sqlite3.Connection) -> int:
+def rollover(from_date: str, to_date: str, conn: sqlite3.Connection, user_id: int | None = None) -> int:
     """Move every todo task with planned_date <= from_date to to_date.
 
     Increments rollover_count by 1. Returns number of tasks moved.
@@ -20,4 +20,4 @@ def rollover(from_date: str, to_date: str, conn: sqlite3.Connection) -> int:
     This is idempotent: after a rollover, no todo task has
     planned_date <= from_date, so calling again moves nothing.
     """
-    return repo.rollover_tasks(conn, from_date, to_date)
+    return repo.rollover_tasks(conn, from_date, to_date, user_id=user_id)

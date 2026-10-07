@@ -13,16 +13,26 @@ import {
   Play,
   Pause,
   Sparkles,
+  LogOut,
 } from 'lucide-react';
 import { useFocusMode } from '../FocusContext';
+import { User } from '../types';
 
 interface SidebarProps {
   activeTab: string;
   onSelectTab: (tab: string) => void;
   onOpenDailyUpdate: () => void;
+  user?: User | null;
+  onLogout?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab, onOpenDailyUpdate }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  activeTab,
+  onSelectTab,
+  onOpenDailyUpdate,
+  user,
+  onLogout,
+}) => {
   const {
     isFocusMode,
     isRunning,
@@ -346,31 +356,122 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab, onOpen
         </nav>
       </div>
 
-      {/* Footer / Status Indicator */}
-      <div
-        style={{
-          padding: '0.85rem',
-          background: 'rgba(255, 255, 255, 0.02)',
-          borderRadius: '14px',
-          border: '1px solid rgba(255, 255, 255, 0.05)',
-        }}
-      >
-        <div style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          System Engine
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.3rem' }}>
-          <span
+      {/* Footer / User Profile & Status Indicator */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+        {user && (
+          <div
             style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              background: isFocusMode ? '#ec4899' : '#10b981',
-              boxShadow: isFocusMode ? '0 0 8px #ec4899' : '0 0 8px #10b981',
+              padding: '0.75rem',
+              background: 'rgba(255, 255, 255, 0.04)',
+              borderRadius: '14px',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
             }}
-          />
-          <span style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: '600' }}>
-            {isFocusMode ? 'Focus Lockdown' : 'SQLite • Synced'}
-          </span>
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  minWidth: '32px',
+                  borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#ffffff',
+                  fontWeight: '700',
+                  fontSize: '0.85rem',
+                }}
+              >
+                {(user.name || user.email)[0].toUpperCase()}
+              </div>
+              <div style={{ overflow: 'hidden' }}>
+                <div
+                  style={{
+                    fontSize: '0.82rem',
+                    fontWeight: '700',
+                    color: '#f8fafc',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {user.name || user.email.split('@')[0]}
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.7rem',
+                    color: '#94a3b8',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                  title={user.email}
+                >
+                  {user.email}
+                </div>
+              </div>
+            </div>
+
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                title="Sign out of account"
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#94a3b8',
+                  cursor: 'pointer',
+                  padding: '0.4rem',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = '#f87171';
+                  e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = '#94a3b8';
+                  e.currentTarget.style.background = 'transparent';
+                }}
+              >
+                <LogOut size={16} />
+              </button>
+            )}
+          </div>
+        )}
+
+        <div
+          style={{
+            padding: '0.75rem',
+            background: 'rgba(255, 255, 255, 0.02)',
+            borderRadius: '14px',
+            border: '1px solid rgba(255, 255, 255, 0.05)',
+          }}
+        >
+          <div style={{ fontSize: '0.7rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            System Engine
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginTop: '0.25rem' }}>
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: isFocusMode ? '#ec4899' : '#10b981',
+                boxShadow: isFocusMode ? '0 0 8px #ec4899' : '0 0 8px #10b981',
+              }}
+            />
+            <span style={{ fontSize: '0.78rem', color: '#cbd5e1', fontWeight: '600' }}>
+              {isFocusMode ? 'Focus Lockdown' : 'Isolated Workspace'}
+            </span>
+          </div>
         </div>
       </div>
     </aside>

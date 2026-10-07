@@ -25,25 +25,9 @@ def create_task(
     parent_task_id: int | None = None,
     estimated_min: int | None = None,
     notes: str | None = None,
+    user_id: int | None = None,
 ) -> int:
-    """Create a new task. Defaults planned_date to today if not provided.
-
-    Args:
-        conn: Database connection.
-        title: Task title (required).
-        planned_date: Date to plan the task. None = backlog.
-        due_date: Hard deadline (optional).
-        priority: 'high', 'medium', or 'low'.
-        category: 'work', 'learning', or 'personal'.
-        goal_id: Optional linked goal.
-        learning_item_id: Optional linked learning item.
-        parent_task_id: Optional parent task for subtasks.
-        estimated_min: Estimated minutes.
-        notes: Additional notes.
-
-    Returns:
-        The new task id.
-    """
+    """Create a new task. Defaults planned_date to today if not provided."""
     return repo.create_task(
         conn,
         title=title,
@@ -56,32 +40,21 @@ def create_task(
         parent_task_id=parent_task_id,
         estimated_min=estimated_min,
         notes=notes,
+        user_id=user_id,
     )
 
 
-def complete(task_id: int, conn, today_date: str | None = None) -> Task:
-    """Mark a task as done.
-
-    Sets status='done', completed_at=now, completed_date=today.
-    Raises ValueError if the task has open subtasks.
-
-    Args:
-        task_id: The task to complete.
-        conn: Database connection.
-        today_date: Override for testing. Defaults to today().
-
-    Returns:
-        The updated task.
-    """
+def complete(task_id: int, conn, today_date: str | None = None, user_id: int | None = None) -> Task:
+    """Mark a task as done."""
     if today_date is None:
         today_date = today()
 
-    task = repo.get_task(conn, task_id)
+    task = repo.get_task(conn, task_id, user_id=user_id)
     if task is None:
         raise ValueError(f"Task {task_id} not found")
 
     # Check for open subtasks (Section 7.2)
-    open_subs = repo.get_open_subtasks(conn, task_id)
+    open_subs = repo.get_open_subtasks(conn, task_id, user_id=user_id)
     if open_subs:
         raise ValueError(
             f"Cannot complete task '{task.title}': "
@@ -89,78 +62,63 @@ def complete(task_id: int, conn, today_date: str | None = None) -> Task:
         )
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    repo.complete_task(conn, task_id, completed_at=now, completed_date=today_date)
-    return repo.get_task(conn, task_id)
+    repo.complete_task(conn, task_id, completed_at=now, completed_date=today_date, user_id=user_id)
+    return repo.get_task(conn, task_id, user_id=user_id)
 
 
-def uncomplete(task_id: int, conn) -> Task:
-    """Revert a done task back to todo.
-
-    Clears completed_at and completed_date.
-    """
-    repo.uncomplete_task(conn, task_id)
-    return repo.get_task(conn, task_id)
+def uncomplete(task_id: int, conn, user_id: int | None = None) -> Task:
+    """Revert a done task back to todo."""
+    repo.uncomplete_task(conn, task_id, user_id=user_id)
+    return repo.get_task(conn, task_id, user_id=user_id)
 
 
-def drop(task_id: int, conn) -> None:
+def drop(task_id: int, conn, user_id: int | None = None) -> None:
     """Soft-delete a task (status='dropped')."""
-    repo.drop_task(conn, task_id)
+    repo.drop_task(conn, task_id, user_id=user_id)
 
 
-def restore(task_id: int, conn) -> None:
+def restore(task_id: int, conn, user_id: int | None = None) -> None:
     """Restore a dropped task to todo."""
-    repo.restore_task(conn, task_id)
+    repo.restore_task(conn, task_id, user_id=user_id)
 
 
-def delete_permanently(task_id: int, conn) -> None:
+def delete_permanently(task_id: int, conn, user_id: int | None = None) -> None:
     """Permanently delete a task."""
-    repo.delete_task_permanently(conn, task_id)
+    repo.delete_task_permanently(conn, task_id, user_id=user_id)
 
 
-def set_top3(task_id: int, value: bool, conn) -> None:
-    """Set or clear the top-3 flag.
-
-    Raises ValueError if setting a 4th top-3 task for the same planned_date.
-    """
-    task = repo.get_task(conn, task_id)
+def set_top3(task_id: int, value: bool, conn, user_id: int | None = None) -> None:
+    """Set or clear the top-3 flag."""
+    task = repo.get_task(conn, task_id, user_id=user_id)
     if task is None:
         raise ValueError(f"Task {task_id} not found")
 
     if value:
         # Check the limit (Section 7.2): at most 3 top-3 tasks per date
         if task.planned_date:
-            current_count = repo.count_top3_todo(conn, task.planned_date)
+            current_count = repo.count_top3_todo(conn, task.planned_date, user_id=user_id)
             # Don't count this task if it's already top-3
             already = task.is_top3 and task.status == "todo"
             effective = current_count - (1 if already else 0)
             if effective >= 3:
                 raise ValueError("Only 3 priorities per day")
 
-    repo.set_top3(conn, task_id, 1 if value else 0)
+    repo.set_top3(conn, task_id, 1 if value else 0, user_id=user_id)
 
 
-def update_task(task_id: int, conn, **fields) -> None:
+def update_task(task_id: int, conn, user_id: int | None = None, **fields) -> None:
     """Update arbitrary fields on a task."""
-    repo.update_task(conn, task_id, **fields)
+    repo.update_task(conn, task_id, user_id=user_id, **fields)
 
 
-def get_tasks_for_today(conn, today_date: str | None = None) -> dict:
-    """Get all task groups for the Today page.
-
-    Returns a dict with:
-        top3: list[Task] — top-3 priority tasks
-        other_high: list[Task] — high priority, not top-3
-        other_medium: list[Task] — medium priority
-        other_low: list[Task] — low priority
-        completed: list[Task] — completed today
-        overdue: list[Task] — overdue tasks
-    """
+def get_tasks_for_today(conn, today_date: str | None = None, user_id: int | None = None) -> dict:
+    """Get all task groups for the Today page."""
     if today_date is None:
         today_date = today()
 
-    todo_tasks = repo.get_todo_tasks_for_date(conn, today_date)
-    completed = repo.get_done_tasks_for_date(conn, today_date)
-    overdue = repo.get_overdue_tasks(conn, today_date)
+    todo_tasks = repo.get_todo_tasks_for_date(conn, today_date, user_id=user_id)
+    completed = repo.get_done_tasks_for_date(conn, today_date, user_id=user_id)
+    overdue = repo.get_overdue_tasks(conn, today_date, user_id=user_id)
 
     top3 = [t for t in todo_tasks if t.is_top3]
     other = [t for t in todo_tasks if not t.is_top3]

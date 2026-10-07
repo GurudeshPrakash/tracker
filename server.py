@@ -2,6 +2,7 @@
 
 Directly bridges the verified SQLite repository and service layers to the
 modern TypeScript Bento-Grid Single-Page Application (and provides static asset serving).
+Fully secured with multi-user JWT authentication and strict tenant data isolation.
 """
 
 from __future__ import annotations
@@ -19,17 +20,18 @@ from dataclasses import asdict
 from datetime import date as dt_date, timedelta
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, Query, Body, Response, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, Body, Response, UploadFile, File, Depends, status
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from lib.dates import today, add_days, week_start, week_end
 from db.connection import get_conn
 from db.migrations import run_migrations
 from db import repository as repo
-from db.models import DailyUpdateForm
+from db.models import DailyUpdateForm, User
 from services import (
     tasks as task_svc,
     daily_update as du_svc,
@@ -40,6 +42,7 @@ from services import (
     recurring as rec_svc,
     rollover,
     suggestions as suggest_svc,
+    auth as auth_svc,
 )
 
 # Startup routine
@@ -76,8 +79,63 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
+# Authentication Dependency
+# ---------------------------------------------------------------------------
+security = HTTPBearer(auto_error=False)
+
+
+def get_current_user(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> User:
+    """Extract and verify JWT bearer token, resolving the current user."""
+    if not credentials or not credentials.credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    token = credentials.credentials
+    payload = auth_svc.decode_access_token(token)
+    if not payload or "sub" not in payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    try:
+        user_id = int(payload["sub"])
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    with get_conn() as conn:
+        user = auth_svc.get_user_by_id(conn, user_id)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User account no longer exists",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        return user
+
+
+# ---------------------------------------------------------------------------
 # Pydantic Request Models
 # ---------------------------------------------------------------------------
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+    name: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
 class TaskCreateRequest(BaseModel):
     title: str
     priority: str = "medium"
@@ -90,6 +148,7 @@ class TaskCreateRequest(BaseModel):
     notes: Optional[str] = None
     parent_task_id: Optional[int] = None
 
+
 class TaskUpdateRequest(BaseModel):
     title: Optional[str] = None
     priority: Optional[str] = None
@@ -99,11 +158,14 @@ class TaskUpdateRequest(BaseModel):
     planned_date: Optional[str] = None
     notes: Optional[str] = None
 
+
 class TaskTop3Request(BaseModel):
     is_top3: bool
 
+
 class SubtaskCreateRequest(BaseModel):
     title: str
+
 
 class DailyCloseRequest(BaseModel):
     date: str
@@ -115,6 +177,7 @@ class DailyCloseRequest(BaseModel):
     tomorrow_focus: str = ""
     carry_task_ids: List[int] = []
 
+
 class DailyUpdateRequest(BaseModel):
     date: str
     completed_summary: str = ""
@@ -124,12 +187,14 @@ class DailyUpdateRequest(BaseModel):
     blockers: str = ""
     tomorrow_focus: str = ""
 
+
 class LearningItemCreate(BaseModel):
     skill: str
     resource: str
     resource_type: str = "course"
     status: str = "in_progress"
     goal_id: Optional[int] = None
+
 
 class LearningSessionCreate(BaseModel):
     learning_item_id: int
@@ -139,6 +204,7 @@ class LearningSessionCreate(BaseModel):
     confidence: Optional[int] = None
     task_id: Optional[int] = None
 
+
 class GoalCreateRequest(BaseModel):
     title: str
     target_type: str = "weekly_hours"
@@ -146,14 +212,17 @@ class GoalCreateRequest(BaseModel):
     start_date: str
     target_date: Optional[str] = None
 
+
 class GoalUpdateRequest(BaseModel):
     status: str
+
 
 class ReviewCreateRequest(BaseModel):
     week_start: str
     wins: Optional[str] = None
     blockers: Optional[str] = None
     next_focus: Optional[str] = None
+
 
 class RecurringCreateRequest(BaseModel):
     title: str
@@ -167,6 +236,7 @@ class RecurringCreateRequest(BaseModel):
     weekday: Optional[int] = None
     day_of_month: Optional[int] = None
     end_date: Optional[str] = None
+
 
 class RecurringUpdateRequest(BaseModel):
     title: Optional[str] = None
@@ -182,34 +252,108 @@ class RecurringUpdateRequest(BaseModel):
     end_date: Optional[str] = None
     active: Optional[int] = None
 
+
 class BackupRestoreRequest(BaseModel):
     filename: str
+
 
 class RecurringGenerateRequest(BaseModel):
     date: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
-# API Endpoints
+# Public Health Check
 # ---------------------------------------------------------------------------
+@app.get("/api/health")
+def health_check():
+    """Deployment health check probe."""
+    return {"status": "ok", "app": "flux-tracker", "date": today()}
 
-@app.get("/api/today")
-def get_today_dashboard():
-    """Return consolidated data for Today's Bento Dashboard."""
-    today_iso = today()
+
+# ---------------------------------------------------------------------------
+# Auth Endpoints (Public)
+# ---------------------------------------------------------------------------
+@app.post("/api/auth/register")
+def register(req: RegisterRequest):
+    """Register a new user account and return JWT session token."""
     with get_conn() as conn:
-        streak = stats.update_streak(today_iso, conn)
-        done_count = repo.count_completed_for_date(conn, today_iso)
-        todo_tasks = repo.get_todo_tasks_for_date(conn, today_iso)
-        done_tasks = repo.get_done_tasks_for_date(conn, today_iso)
-        overdue_tasks = repo.get_overdue_tasks(conn, today_iso)
-        top3_tasks = repo.get_top3_tasks(conn, today_iso)
-        study_min = repo.study_minutes_for_date(conn, today_iso)
-        suggestions = suggest_svc.suggest_tasks_for(today_iso, conn)
-        day_closed = repo.get_daily_update(conn, today_iso) is not None
+        try:
+            user = auth_svc.create_user(
+                conn,
+                email=req.email,
+                password=req.password,
+                name=req.name,
+            )
+            token = auth_svc.create_access_token(user.id, user.email)
+            return {
+                "token": token,
+                "user": {
+                    "id": user.id,
+                    "email": user.email,
+                    "name": user.name,
+                },
+            }
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception:
+            logging.exception("Registration error")
+            raise HTTPException(status_code=500, detail="Registration failed")
+
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest):
+    """Authenticate email and password, returning a JWT session token."""
+    with get_conn() as conn:
+        user = auth_svc.authenticate_user(conn, req.email, req.password)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        token = auth_svc.create_access_token(user.id, user.email)
+        return {
+            "token": token,
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "name": user.name,
+            },
+        }
+
+
+@app.get("/api/auth/me")
+def get_me(current_user: User = Depends(get_current_user)):
+    """Return profile details for currently authenticated user."""
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "name": current_user.name,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Bento Dashboard Endpoint (Scoped to current_user)
+# ---------------------------------------------------------------------------
+@app.get("/api/today")
+def get_today_dashboard(current_user: User = Depends(get_current_user)):
+    """Return consolidated data for Today's Bento Dashboard for the current user."""
+    today_iso = today()
+    uid = current_user.id
+
+    with get_conn() as conn:
+        # Run rollover and recurring task generation for this user
+        rollover.rollover(add_days(today_iso, -1), today_iso, conn, user_id=uid)
+        rec_svc.generate_for_date(today_iso, conn)
+
+        streak = stats.update_streak(today_iso, conn, user_id=uid)
+        done_count = repo.count_completed_for_date(conn, today_iso, user_id=uid)
+        todo_tasks = repo.get_todo_tasks_for_date(conn, today_iso, user_id=uid)
+        done_tasks = repo.get_done_tasks_for_date(conn, today_iso, user_id=uid)
+        overdue_tasks = repo.get_overdue_tasks(conn, today_iso, user_id=uid)
+        top3_tasks = repo.get_top3_tasks(conn, today_iso, user_id=uid)
+        study_min = repo.study_minutes_for_date(conn, today_iso, user_id=uid)
+        suggestions = suggest_svc.suggest_tasks_for(today_iso, conn, user_id=uid)
+        day_closed = repo.get_daily_update(conn, today_iso, user_id=uid) is not None
 
         # Active goals with progress
-        goals = repo.get_active_goals(conn)
+        goals = repo.get_active_goals(conn, user_id=uid)
         goals_progress = []
         for g in goals:
             prog = goal_svc.goal_progress(g.id, today_iso, conn)
@@ -220,10 +364,10 @@ def get_today_dashboard():
 
         # Recent learning sessions for bento card
         seven_days_ago = add_days(today_iso, -7)
-        recent_sessions_raw = repo.get_sessions_in_range(conn, seven_days_ago, today_iso)
+        recent_sessions_raw = repo.get_sessions_in_range(conn, seven_days_ago, today_iso, user_id=uid)
         recent_sessions = []
         for s in recent_sessions_raw[:5]:
-            item = repo.get_learning_item(conn, s.learning_item_id)
+            item = repo.get_learning_item(conn, s.learning_item_id, user_id=uid)
             recent_sessions.append({
                 "session": asdict(s),
                 "skill": item.skill if item else "Unknown",
@@ -231,14 +375,14 @@ def get_today_dashboard():
             })
 
         # Real weekly stats for mini-charts
-        cr_series = stats.completion_rate_series(seven_days_ago, today_iso, conn).to_dict(orient="records")
-        skill_series = stats.study_minutes_by_skill(seven_days_ago, today_iso, conn).to_dict(orient="records")
+        cr_series = stats.completion_rate_series(seven_days_ago, today_iso, conn, user_id=uid).to_dict(orient="records")
+        skill_series = stats.study_minutes_by_skill(seven_days_ago, today_iso, conn, user_id=uid).to_dict(orient="records")
 
         # Attach subtasks to todo tasks
         todo_with_subtasks = []
         for t in todo_tasks:
             d = asdict(t)
-            subs = repo.get_subtasks(conn, t.id)
+            subs = repo.get_subtasks(conn, t.id, user_id=uid)
             d["subtasks"] = [asdict(sub) for sub in subs]
             todo_with_subtasks.append(d)
 
@@ -261,15 +405,13 @@ def get_today_dashboard():
     }
 
 
-@app.get("/api/health")
-def health_check():
-    """Deployment health check probe."""
-    return {"status": "ok", "app": "flux-tracker", "date": today()}
-
-
+# ---------------------------------------------------------------------------
+# Task Endpoints (Scoped to current_user)
+# ---------------------------------------------------------------------------
 @app.post("/api/tasks")
-def create_task(req: TaskCreateRequest):
+def create_task(req: TaskCreateRequest, current_user: User = Depends(get_current_user)):
     today_iso = today()
+    uid = current_user.id
     with get_conn() as conn:
         task_id = task_svc.create_task(
             conn,
@@ -283,54 +425,61 @@ def create_task(req: TaskCreateRequest):
             notes=req.notes,
             due_date=req.due_date,
             parent_task_id=req.parent_task_id,
+            user_id=uid,
         )
-        task = repo.get_task(conn, task_id)
+        task = repo.get_task(conn, task_id, user_id=uid)
     return asdict(task) if task else {"id": task_id}
 
 
 @app.post("/api/tasks/{task_id}/complete")
-def complete_task(task_id: int):
+def complete_task(task_id: int, current_user: User = Depends(get_current_user)):
     today_iso = today()
+    uid = current_user.id
     with get_conn() as conn:
         try:
-            task_svc.complete(task_id, conn, today_iso)
-            task = repo.get_task(conn, task_id)
+            task_svc.complete(task_id, conn, today_iso, user_id=uid)
+            task = repo.get_task(conn, task_id, user_id=uid)
             return {"success": True, "task": asdict(task) if task else None}
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/tasks/{task_id}/uncomplete")
-def uncomplete_task(task_id: int):
+def uncomplete_task(task_id: int, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
-        task_svc.uncomplete(task_id, conn)
-        task = repo.get_task(conn, task_id)
+        task_svc.uncomplete(task_id, conn, user_id=uid)
+        task = repo.get_task(conn, task_id, user_id=uid)
     return {"success": True, "task": asdict(task) if task else None}
 
 
 @app.post("/api/tasks/{task_id}/top3")
-def toggle_top3(task_id: int, req: TaskTop3Request):
+def toggle_top3(task_id: int, req: TaskTop3Request, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
         try:
-            task_svc.set_top3(task_id, req.is_top3, conn)
+            task_svc.set_top3(task_id, req.is_top3, conn, user_id=uid)
             return {"success": True, "is_top3": req.is_top3}
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/tasks/{task_id}/drop")
-def drop_task(task_id: int):
+def drop_task(task_id: int, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
-        task_svc.drop(task_id, conn)
+        task_svc.drop(task_id, conn, user_id=uid)
     return {"success": True}
 
 
 @app.put("/api/tasks/{task_id}")
-def update_task(task_id: int, req: TaskUpdateRequest):
+def update_task(task_id: int, req: TaskUpdateRequest, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
         task_svc.update_task(
             task_id,
             conn,
+            user_id=uid,
             title=req.title,
             priority=req.priority,
             category=req.category,
@@ -339,15 +488,16 @@ def update_task(task_id: int, req: TaskUpdateRequest):
             planned_date=req.planned_date,
             notes=req.notes,
         )
-        task = repo.get_task(conn, task_id)
+        task = repo.get_task(conn, task_id, user_id=uid)
     return asdict(task) if task else {"id": task_id}
 
 
 @app.post("/api/tasks/{parent_id}/subtasks")
-def add_subtask(parent_id: int, req: SubtaskCreateRequest):
+def add_subtask(parent_id: int, req: SubtaskCreateRequest, current_user: User = Depends(get_current_user)):
     today_iso = today()
+    uid = current_user.id
     with get_conn() as conn:
-        parent = repo.get_task(conn, parent_id)
+        parent = repo.get_task(conn, parent_id, user_id=uid)
         if not parent:
             raise HTTPException(status_code=404, detail="Parent task not found")
         sub_id = task_svc.create_task(
@@ -357,20 +507,21 @@ def add_subtask(parent_id: int, req: SubtaskCreateRequest):
             priority=parent.priority,
             category=parent.category,
             parent_task_id=parent_id,
+            user_id=uid,
         )
-        sub = repo.get_task(conn, sub_id)
+        sub = repo.get_task(conn, sub_id, user_id=uid)
     return asdict(sub) if sub else {"id": sub_id}
 
 
 # ---------------------------------------------------------------------------
 # Daily Update & Reflection
 # ---------------------------------------------------------------------------
-
 @app.get("/api/daily-update")
-def get_daily_update_prefill(date: Optional[str] = None):
+def get_daily_update_prefill(date: Optional[str] = None, current_user: User = Depends(get_current_user)):
     target_date = date or today()
+    uid = current_user.id
     with get_conn() as conn:
-        prefill = du_svc.build_prefill(target_date, conn)
+        prefill = du_svc.build_prefill(target_date, conn, user_id=uid)
 
         return {
             "date": target_date,
@@ -384,7 +535,8 @@ def get_daily_update_prefill(date: Optional[str] = None):
 
 
 @app.post("/api/daily-update/close")
-def close_daily_update(req: DailyCloseRequest):
+def close_daily_update(req: DailyCloseRequest, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     form = DailyUpdateForm(
         completed_summary=req.completed_summary,
         learned_today=req.learned_today,
@@ -394,11 +546,11 @@ def close_daily_update(req: DailyCloseRequest):
         tomorrow_focus=req.tomorrow_focus,
     )
     with get_conn() as conn:
-        saved = du_svc.close_day(req.date, form, req.carry_task_ids, conn)
+        saved = du_svc.close_day(req.date, form, req.carry_task_ids, conn, user_id=uid)
         # Fetch tomorrow's tasks & suggestions preview
         next_day = add_days(req.date, 1)
-        tomorrow_tasks = repo.get_todo_tasks_for_date(conn, next_day)
-        suggestions = suggest_svc.suggest_tasks_for(next_day, conn)
+        tomorrow_tasks = repo.get_todo_tasks_for_date(conn, next_day, user_id=uid)
+        suggestions = suggest_svc.suggest_tasks_for(next_day, conn, user_id=uid)
 
     return {
         "success": True,
@@ -412,9 +564,10 @@ def close_daily_update(req: DailyCloseRequest):
 
 
 @app.put("/api/daily-update")
-def update_daily_reflection(req: DailyUpdateRequest):
+def update_daily_reflection(req: DailyUpdateRequest, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
-        existing = repo.get_daily_update(conn, req.date)
+        existing = repo.get_daily_update(conn, req.date, user_id=uid)
         if not existing:
             raise HTTPException(status_code=404, detail="Daily update not found for date")
         repo.upsert_daily_update(
@@ -428,21 +581,22 @@ def update_daily_reflection(req: DailyUpdateRequest):
             day_rating=req.day_rating,
             blockers=req.blockers,
             tomorrow_focus=req.tomorrow_focus,
+            user_id=uid,
         )
-        updated = repo.get_daily_update(conn, req.date)
+        updated = repo.get_daily_update(conn, req.date, user_id=uid)
     return asdict(updated) if updated else {"success": True}
 
 
 # ---------------------------------------------------------------------------
 # Learning Endpoints
 # ---------------------------------------------------------------------------
-
 @app.get("/api/learning")
-def get_learning_data():
+def get_learning_data(current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
-        items = repo.get_all_learning_items(conn)
-        distinct_skills = repo.get_distinct_skills(conn)
-        goals = repo.get_all_goals(conn)
+        items = repo.get_all_learning_items(conn, user_id=uid)
+        distinct_skills = repo.get_distinct_skills(conn, user_id=uid)
+        goals = repo.get_all_goals(conn, user_id=uid)
     return {
         "items": [asdict(it) for it in items],
         "distinct_skills": distinct_skills,
@@ -451,7 +605,8 @@ def get_learning_data():
 
 
 @app.post("/api/learning/items")
-def create_learning_item(req: LearningItemCreate):
+def create_learning_item(req: LearningItemCreate, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
         item_id = repo.create_learning_item(
             conn,
@@ -460,25 +615,33 @@ def create_learning_item(req: LearningItemCreate):
             resource_type=req.resource_type,
             status=req.status,
             goal_id=req.goal_id,
+            user_id=uid,
         )
-        item = repo.get_learning_item(conn, item_id)
+        item = repo.get_learning_item(conn, item_id, user_id=uid)
     return asdict(item) if item else {"id": item_id}
 
 
 @app.post("/api/learning/sessions")
-def log_learning_session(req: LearningSessionCreate):
+def log_learning_session(req: LearningSessionCreate, current_user: User = Depends(get_current_user)):
     today_iso = today()
+    uid = current_user.id
     with get_conn() as conn:
         try:
-            sess_id = learn_svc.log_session(
-                item_id=req.learning_item_id,
+            sess_id = repo.create_learning_session(
+                conn,
+                learning_item_id=req.learning_item_id,
                 session_date=req.session_date or today_iso,
                 duration_min=req.duration_min,
                 takeaway=req.takeaway.strip(),
                 confidence=req.confidence,
                 task_id=req.task_id,
-                conn=conn,
+                user_id=uid,
             )
+            if req.task_id:
+                task = repo.get_task(conn, req.task_id, user_id=uid)
+                if task and task.actual_min is None:
+                    repo.update_task(conn, req.task_id, user_id=uid, actual_min=req.duration_min)
+
             return {"success": True, "id": sess_id}
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
@@ -490,23 +653,25 @@ def get_learning_history(
     end: Optional[str] = None,
     skill: Optional[str] = None,
     q: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
 ):
     today_iso = today()
+    uid = current_user.id
     start_date = start or add_days(today_iso, -30)
     end_date = end or today_iso
 
     with get_conn() as conn:
         if q and q.strip():
-            sessions = repo.search_takeaways(conn, q.strip())
+            sessions = repo.search_takeaways(conn, q.strip(), user_id=uid)
         elif skill and skill != "All":
-            sessions = repo.get_sessions_in_range(conn, start_date, end_date, skill=skill)
+            sessions = repo.get_sessions_in_range(conn, start_date, end_date, skill=skill, user_id=uid)
         else:
-            sessions = repo.get_sessions_in_range(conn, start_date, end_date)
+            sessions = repo.get_sessions_in_range(conn, start_date, end_date, user_id=uid)
 
         items_map = {}
         for s in sessions:
             if s.learning_item_id not in items_map:
-                it = repo.get_learning_item(conn, s.learning_item_id)
+                it = repo.get_learning_item(conn, s.learning_item_id, user_id=uid)
                 items_map[s.learning_item_id] = it
 
         results = []
@@ -522,24 +687,25 @@ def get_learning_history(
 
 
 @app.get("/api/learning/review")
-def get_review_takeaways():
+def get_review_takeaways(current_user: User = Depends(get_current_user)):
     today_iso = today()
+    uid = current_user.id
     seven_days_ago = add_days(today_iso, -7)
     with get_conn() as conn:
-        old = repo.get_random_old_takeaways(conn, seven_days_ago, limit=5)
+        old = repo.get_random_old_takeaways(conn, seven_days_ago, limit=5, user_id=uid)
     return old
 
 
 # ---------------------------------------------------------------------------
 # Goals Endpoints
 # ---------------------------------------------------------------------------
-
 @app.get("/api/goals")
-def get_goals():
+def get_goals(current_user: User = Depends(get_current_user)):
     today_iso = today()
+    uid = current_user.id
     with get_conn() as conn:
-        goals = repo.get_all_goals(conn)
-        items = repo.get_all_learning_items(conn)
+        goals = repo.get_all_goals(conn, user_id=uid)
+        items = repo.get_all_learning_items(conn, user_id=uid)
 
         results = []
         for g in goals:
@@ -554,7 +720,8 @@ def get_goals():
 
 
 @app.post("/api/goals")
-def create_goal(req: GoalCreateRequest):
+def create_goal(req: GoalCreateRequest, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
         gid = repo.create_goal(
             conn,
@@ -563,45 +730,48 @@ def create_goal(req: GoalCreateRequest):
             target_hours=req.target_hours,
             start_date=req.start_date,
             target_date=req.target_date,
+            user_id=uid,
         )
-        goal = repo.get_goal(conn, gid)
+        goal = repo.get_goal(conn, gid, user_id=uid)
     return asdict(goal) if goal else {"id": gid}
 
 
 @app.put("/api/goals/{goal_id}")
-def update_goal_status(goal_id: int, req: GoalUpdateRequest):
+def update_goal_status(goal_id: int, req: GoalUpdateRequest, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
-        repo.update_goal(conn, goal_id, status=req.status)
-        goal = repo.get_goal(conn, goal_id)
+        repo.update_goal(conn, goal_id, user_id=uid, status=req.status)
+        goal = repo.get_goal(conn, goal_id, user_id=uid)
     return asdict(goal) if goal else {"id": goal_id}
 
 
 # ---------------------------------------------------------------------------
 # Insights & Stats Endpoints
 # ---------------------------------------------------------------------------
-
 @app.get("/api/stats")
-def get_statistics(start: Optional[str] = None, end: Optional[str] = None):
+def get_statistics(
+    start: Optional[str] = None,
+    end: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
+):
     today_iso = today()
+    uid = current_user.id
     start_date = start or add_days(today_iso, -30)
     end_date = end or today_iso
 
     with get_conn() as conn:
-        streak = stats.update_streak(today_iso, conn)
-        avg_rat = stats.average_rating(start_date, end_date, conn)
-        total_study = conn.execute(
-            "SELECT COALESCE(SUM(duration_min), 0) FROM learning_session WHERE session_date BETWEEN ? AND ?",
-            (start_date, end_date),
-        ).fetchone()[0]
-        tasks_done = repo.count_done_tasks_in_range(conn, start_date, end_date)
+        streak = stats.update_streak(today_iso, conn, user_id=uid)
+        avg_rat = stats.average_rating(start_date, end_date, conn, user_id=uid)
+        study_sql = "SELECT COALESCE(SUM(duration_min), 0) FROM learning_session WHERE session_date BETWEEN ? AND ? AND user_id = ?"
+        total_study = conn.execute(study_sql, (start_date, end_date, uid)).fetchone()[0]
+        tasks_done = repo.count_done_tasks_in_range(conn, start_date, end_date, user_id=uid)
 
-        # Dataframe serializations
-        cr_df = stats.completion_rate_series(start_date, end_date, conn)
-        cat_df = stats.minutes_by_category(start_date, end_date, conn)
-        skill_df = stats.study_minutes_by_skill(start_date, end_date, conn)
-        week_df = stats.study_minutes_per_week(12, today_iso, conn)
+        cr_df = stats.completion_rate_series(start_date, end_date, conn, user_id=uid)
+        cat_df = stats.minutes_by_category(start_date, end_date, conn, user_id=uid)
+        skill_df = stats.study_minutes_by_skill(start_date, end_date, conn, user_id=uid)
+        week_df = stats.study_minutes_per_week(12, today_iso, conn, user_id=uid)
 
-        updates = repo.get_daily_updates_in_range(conn, start_date, end_date)
+        updates = repo.get_daily_updates_in_range(conn, start_date, end_date, user_id=uid)
         ratings = [{"date": u.date, "rating": u.day_rating} for u in updates if u.day_rating]
 
     return {
@@ -620,16 +790,16 @@ def get_statistics(start: Optional[str] = None, end: Optional[str] = None):
 # ---------------------------------------------------------------------------
 # Weekly Review Endpoints
 # ---------------------------------------------------------------------------
-
 @app.get("/api/reviews")
-def get_reviews(week: Optional[str] = None):
+def get_reviews(week: Optional[str] = None, current_user: User = Depends(get_current_user)):
     today_iso = today()
+    uid = current_user.id
     target_week = week or week_start(today_iso)
 
     with get_conn() as conn:
-        summary = stats.week_summary(target_week, conn)
-        current_review = repo.get_review(conn, target_week)
-        all_reviews = repo.get_all_reviews(conn)
+        summary = stats.week_summary(target_week, conn, user_id=uid)
+        current_review = repo.get_review(conn, target_week, user_id=uid)
+        all_reviews = repo.get_all_reviews(conn, user_id=uid)
 
     return {
         "selected_week": target_week,
@@ -640,7 +810,8 @@ def get_reviews(week: Optional[str] = None):
 
 
 @app.post("/api/reviews")
-def save_review(req: ReviewCreateRequest):
+def save_review(req: ReviewCreateRequest, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
         repo.upsert_review(
             conn,
@@ -648,29 +819,26 @@ def save_review(req: ReviewCreateRequest):
             wins=req.wins,
             blockers=req.blockers,
             next_focus=req.next_focus,
+            user_id=uid,
         )
-        review = repo.get_review(conn, req.week_start)
+        review = repo.get_review(conn, req.week_start, user_id=uid)
     return asdict(review) if review else {"success": True}
 
 
 # ---------------------------------------------------------------------------
-# Settings, Backups, Recurring, Exports & Automation (OWASP Hardened)
+# Settings, Backups, Recurring, Exports
 # ---------------------------------------------------------------------------
-
 SAFE_BACKUP_FILENAME_REGEX = re.compile(r"^[a-zA-Z0-9_-]+\.db$")
 
 
 def validate_backup_filename(filename: str) -> str:
-    """OWASP A01/A04 Path Traversal Guard:
-    Ensure filename contains strictly valid characters and resolves strictly inside BACKUP_DIR.
-    """
+    """OWASP A01/A04 Path Traversal Guard."""
     if not filename or not SAFE_BACKUP_FILENAME_REGEX.match(filename):
         raise HTTPException(status_code=400, detail="Invalid filename format.")
 
     canonical_dir = os.path.realpath(backup.BACKUP_DIR)
     target_path = os.path.realpath(os.path.join(backup.BACKUP_DIR, filename))
 
-    # Path traversal check: resolved path must be inside canonical backup directory
     if not target_path.startswith(canonical_dir + os.sep) and target_path != canonical_dir:
         raise HTTPException(status_code=400, detail="Access denied.")
 
@@ -681,19 +849,19 @@ def validate_backup_filename(filename: str) -> str:
 
 
 @app.get("/api/settings")
-def get_settings():
+def get_settings(current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
         raw_backups = backup.list_backups()
-        # OWASP CWE-200: Redact absolute host filesystem paths
         safe_backups = [
             {"name": b["name"], "size_mb": b["size_mb"], "created": b["created"]}
             for b in raw_backups
         ]
-        recurring = rec_svc.get_all(conn)
-        task_count = conn.execute("SELECT COUNT(*) FROM task").fetchone()[0]
-        session_count = conn.execute("SELECT COUNT(*) FROM learning_session").fetchone()[0]
-        goal_count = conn.execute("SELECT COUNT(*) FROM goal").fetchone()[0]
-        update_count = conn.execute("SELECT COUNT(*) FROM daily_update").fetchone()[0]
+        recurring = repo.get_all_recurring_tasks(conn, user_id=uid)
+        task_count = conn.execute("SELECT COUNT(*) FROM task WHERE user_id = ?", (uid,)).fetchone()[0]
+        session_count = conn.execute("SELECT COUNT(*) FROM learning_session WHERE user_id = ?", (uid,)).fetchone()[0]
+        goal_count = conn.execute("SELECT COUNT(*) FROM goal WHERE user_id = ?", (uid,)).fetchone()[0]
+        update_count = conn.execute("SELECT COUNT(*) FROM daily_update WHERE user_id = ?", (uid,)).fetchone()[0]
 
     return {
         "backups": safe_backups,
@@ -703,6 +871,7 @@ def get_settings():
             "storage_engine": "SQLite",
             "sqlite_version": sqlite3.sqlite_version,
             "security_shield": "OWASP Information Disclosure Shield Active",
+            "user_email": current_user.email,
             "table_counts": {
                 "tasks": task_count,
                 "sessions": session_count,
@@ -715,9 +884,8 @@ def get_settings():
 
 
 @app.get("/api/backups")
-def get_backups():
+def get_backups(current_user: User = Depends(get_current_user)):
     raw_backups = backup.list_backups()
-    # OWASP CWE-200: Redact absolute host filesystem paths
     return [
         {"name": b["name"], "size_mb": b["size_mb"], "created": b["created"]}
         for b in raw_backups
@@ -725,69 +893,67 @@ def get_backups():
 
 
 @app.post("/api/backups")
-def trigger_backup():
+def trigger_backup(current_user: User = Depends(get_current_user)):
     try:
         path = backup.backup_now()
         return {"success": True, "filename": os.path.basename(path)}
-    except Exception as e:
-        logging.error(f"Backup creation error: {e}")
+    except Exception:
+        logging.exception("Backup creation error")
         raise HTTPException(status_code=500, detail="Failed to create backup.")
 
 
 @app.get("/api/backups/{filename}/download")
-def download_backup(filename: str):
+def download_backup(filename: str, current_user: User = Depends(get_current_user)):
     target_path = validate_backup_filename(filename)
     return FileResponse(target_path, filename=filename, media_type="application/x-sqlite3")
 
 
 @app.post("/api/backups/restore")
-def restore_backup(req: BackupRestoreRequest):
+def restore_backup(req: BackupRestoreRequest, current_user: User = Depends(get_current_user)):
     target_path = validate_backup_filename(req.filename)
     try:
         backup.restore_from(target_path)
         return {"success": True, "message": "Database restored successfully."}
-    except Exception as e:
-        logging.error(f"Database restore error: {e}")
+    except Exception:
+        logging.exception("Database restore error")
         raise HTTPException(status_code=500, detail="Failed to restore database from backup.")
 
 
 @app.post("/api/backups/upload")
-async def upload_and_restore_backup(file: UploadFile = File(...)):
-    # 1. Filename validation
+async def upload_and_restore_backup(file: UploadFile = File(...), current_user: User = Depends(get_current_user)):
     if not file.filename or not file.filename.endswith(".db"):
         raise HTTPException(status_code=400, detail="File must be a SQLite .db file.")
 
-    # 2. Maximum file size check (50 MB limit to prevent Denial of Service)
     MAX_SIZE = 50 * 1024 * 1024
     contents = await file.read(MAX_SIZE + 1)
     if len(contents) > MAX_SIZE:
         raise HTTPException(status_code=413, detail="File too large. Maximum allowed size is 50MB.")
 
-    # 3. Magic header validation: SQLite database header starts with 'SQLite format 3\x00'
     if not contents.startswith(b"SQLite format 3\x00"):
         raise HTTPException(status_code=400, detail="Invalid file: Missing valid SQLite database header.")
 
     try:
         backup.restore_from(contents)
         return {"success": True, "message": "Database restored from uploaded backup."}
-    except Exception as e:
-        logging.error(f"Uploaded database restore error: {e}")
+    except Exception:
+        logging.exception("Uploaded database restore error")
         raise HTTPException(status_code=500, detail="Failed to restore database from uploaded file.")
-
 
 
 # Recurring Task Endpoints
 @app.get("/api/recurring")
-def get_recurring_tasks():
+def get_recurring_tasks(current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
-        tasks = rec_svc.get_all(conn)
+        tasks = repo.get_all_recurring_tasks(conn, user_id=uid)
     return [asdict(t) for t in tasks]
 
 
 @app.post("/api/recurring")
-def create_recurring_task(req: RecurringCreateRequest):
+def create_recurring_task(req: RecurringCreateRequest, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
-        rid = rec_svc.create(
+        rid = repo.create_recurring_task(
             conn,
             title=req.title.strip(),
             rule=req.rule,
@@ -800,53 +966,60 @@ def create_recurring_task(req: RecurringCreateRequest):
             weekday=req.weekday,
             day_of_month=req.day_of_month,
             end_date=req.end_date,
+            user_id=uid,
         )
-        tasks = rec_svc.get_all(conn)
+        tasks = repo.get_all_recurring_tasks(conn, user_id=uid)
         created = next((t for t in tasks if t.id == rid), None)
     return asdict(created) if created else {"id": rid}
 
 
 @app.put("/api/recurring/{rec_id}")
-def update_recurring_task(rec_id: int, req: RecurringUpdateRequest):
+def update_recurring_task(rec_id: int, req: RecurringUpdateRequest, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     updates = {k: v for k, v in req.model_dump().items() if v is not None}
     with get_conn() as conn:
-        rec_svc.update(conn, rec_id, **updates)
-        tasks = rec_svc.get_all(conn)
+        repo.update_recurring_task(conn, rec_id, user_id=uid, **updates)
+        tasks = repo.get_all_recurring_tasks(conn, user_id=uid)
         updated = next((t for t in tasks if t.id == rec_id), None)
     return asdict(updated) if updated else {"success": True}
 
 
 @app.delete("/api/recurring/{rec_id}")
-def delete_recurring_task(rec_id: int):
+def delete_recurring_task(rec_id: int, current_user: User = Depends(get_current_user)):
+    uid = current_user.id
     with get_conn() as conn:
-        rec_svc.delete(conn, rec_id)
+        repo.delete_recurring_task(conn, rec_id, user_id=uid)
     return {"success": True}
 
 
 @app.post("/api/recurring/generate")
-def generate_recurring_tasks(req: Optional[RecurringGenerateRequest] = None):
+def generate_recurring_tasks(req: Optional[RecurringGenerateRequest] = None, current_user: User = Depends(get_current_user)):
     target_date = (req.date if req and req.date else None) or today()
     with get_conn() as conn:
         count = rec_svc.generate_for_date(target_date, conn)
     return {"success": True, "date": target_date, "generated_count": count}
 
 
-# Data Export Endpoints
+# Data Export Endpoints (Scoped strictly to current user)
 @app.get("/api/export/csv")
-def export_csv_table(table: str = Query("tasks", regex="^(tasks|sessions|updates|goals)$")):
+def export_csv_table(
+    table: str = Query("tasks", pattern="^(tasks|sessions|updates|goals)$"),
+    current_user: User = Depends(get_current_user),
+):
     today_iso = today()
+    uid = current_user.id
     with get_conn() as conn:
         if table == "tasks":
-            rows = repo.export_table_as_dicts(conn, "task")
+            rows = repo.export_table_as_dicts(conn, "task", user_id=uid)
             filename = f"flux_tasks_{today_iso}.csv"
         elif table == "sessions":
-            rows = repo.export_table_as_dicts(conn, "learning_session")
+            rows = repo.export_table_as_dicts(conn, "learning_session", user_id=uid)
             filename = f"flux_sessions_{today_iso}.csv"
         elif table == "updates":
-            rows = repo.export_table_as_dicts(conn, "daily_update")
+            rows = repo.export_table_as_dicts(conn, "daily_update", user_id=uid)
             filename = f"flux_daily_updates_{today_iso}.csv"
         elif table == "goals":
-            rows = repo.export_table_as_dicts(conn, "goal")
+            rows = repo.export_table_as_dicts(conn, "goal", user_id=uid)
             filename = f"flux_goals_{today_iso}.csv"
         else:
             rows = []
@@ -867,29 +1040,20 @@ def export_csv_table(table: str = Query("tasks", regex="^(tasks|sessions|updates
     )
 
 
-@app.get("/api/export/zip")
-def export_all_tables_zip():
-    today_iso = today()
-    zip_bytes = backup.export_csv_zip()
-    return Response(
-        content=zip_bytes,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="flux_complete_export_{today_iso}.zip"'},
-    )
-
-
 @app.get("/api/export/json")
-def export_database_json():
+def export_database_json(current_user: User = Depends(get_current_user)):
     today_iso = today()
+    uid = current_user.id
     with get_conn() as conn:
         table_names = repo.get_all_table_names(conn)
         dump = {}
         for tbl in table_names:
-            dump[tbl] = repo.export_table_as_dicts(conn, tbl)
+            dump[tbl] = repo.export_table_as_dicts(conn, tbl, user_id=uid)
 
     dump["_metadata"] = {
         "exported_at": today_iso,
         "app": "flux-tracker",
+        "user_email": current_user.email,
         "format": "json_relational_export",
     }
     json_str = json.dumps(dump, indent=2, default=str)
@@ -902,8 +1066,7 @@ def export_database_json():
 
 # Desktop Notifications & Task Scheduler Setup
 @app.get("/api/settings/notifications")
-def get_notification_settings():
-    # Portable scheduled task commands using standard Windows environment execution
+def get_notification_settings(current_user: User = Depends(get_current_user)):
     morning_cmd = 'schtasks /create /tn "FluxTracker_Morning" /tr "python \"%CD%\\reminders\\notify.py\" morning" /sc daily /st 09:00 /f'
     evening_cmd = 'schtasks /create /tn "FluxTracker_Evening" /tr "python \"%CD%\\reminders\\notify.py\" evening" /sc daily /st 21:00 /f'
 
@@ -915,7 +1078,6 @@ def get_notification_settings():
             with open(log_path, "r", encoding="utf-8") as f:
                 lines = [line.strip() for line in f.readlines() if line.strip()][-15:]
                 for line in lines:
-                    # OWASP CWE-200: Redact absolute host filesystem paths like D:\... or C:\...
                     clean_line = re.sub(r"[A-Za-z]:\\[^:\s]+", "[REDACTED_PATH]", line)
                     recent_logs.append(clean_line)
         except Exception:
@@ -928,29 +1090,6 @@ def get_notification_settings():
         "schtasks_evening_cmd": evening_cmd,
         "recent_logs": recent_logs,
     }
-
-
-
-@app.post("/api/settings/test-notification")
-def trigger_test_notification(mode: str = Query("morning", regex="^(morning|evening)$")):
-    try:
-        from plyer import notification
-        from reminders.notify import _get_morning_message, _get_evening_message
-
-        if mode == "morning":
-            title, message = _get_morning_message()
-        else:
-            res = _get_evening_message()
-            if res is None:
-                title, message = "🌙 Close Your Day", "Notice: Day is already closed, but testing toast works!"
-            else:
-                title, message = res
-
-        notification.notify(title=title, message=message, timeout=10)
-        return {"success": True, "mode": mode, "title": title, "message": message}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Notification error: {str(e)}")
-
 
 
 # ---------------------------------------------------------------------------

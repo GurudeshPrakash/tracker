@@ -12,3 +12,5 @@ services:
     envVars:
       - key: PORT
         value: 8501
+      - key: JWT_SECRET
+        generateValue: true
